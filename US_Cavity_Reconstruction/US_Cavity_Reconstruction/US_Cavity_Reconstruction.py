@@ -39,7 +39,7 @@ and Steve Pieper, Isomics, Inc. and was partially funded by NIH grant 3P41RR0132
 #
 # Register sample data sets in Sample Data module
 #
-# print (this)
+# print (this is test)
 def registerSampleData():
   """
   Add data sets to Sample Data module.
