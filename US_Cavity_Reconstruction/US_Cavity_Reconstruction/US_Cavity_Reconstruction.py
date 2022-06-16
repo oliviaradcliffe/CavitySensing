@@ -20,7 +20,7 @@ class US_Cavity_Reconstruction(ScriptedLoadableModule):
     self.parent.title = "US_Cavity_Reconstruction"  # TODO: make this more human readable by adding spaces
     self.parent.categories = ["Examples"]  # TODO: set categories (folders where the module shows up in the module selector)
     self.parent.dependencies = []  # TODO: add here list of module names that this module requires
-    self.parent.contributors = ["John Doe (AnyWare Corp.)"]  # TODO: replace with "Firstname Lastname (Organization)"
+    self.parent.contributors = ["Olivia Radcliffe (Perk/Medi Lab)"]  # TODO: replace with "Firstname Lastname (Organization)"
     # TODO: update with short description of the module and a link to online module documentation
     self.parent.helpText = """
 This is an example of scripted loadable module bundled in an extension.
@@ -134,14 +134,18 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
 
     # These connections ensure that whenever user changes some settings on the GUI, that is saved in the MRML scene
     # (in the selected parameter node).
-    self.ui.inputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
+    self.ui.modelSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
+    self.ui.tipSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
     self.ui.outputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
-    self.ui.imageThresholdSliderWidget.connect("valueChanged(double)", self.updateParameterNodeFromGUI)
-    self.ui.invertOutputCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
-    self.ui.invertedOutputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
+
+    # auto update checkbox
+    self.observedMarkupNode = None
+    self.markupsObserverTag = None
+    self.ui.autoUpdateCheckBox.connect("toggled(bool)", self.onEnableAutoUpdate)
 
     # Buttons
     self.ui.applyButton.connect('clicked(bool)', self.onApplyButton)
+    self.ui.stopButton.connect('clicked(bool)', self.onStopButton)
 
     # Make sure parameter node is initialized (needed for module reload)
     self.initializeParameterNode()
@@ -191,10 +195,11 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
     self.setParameterNode(self.logic.getParameterNode())
 
     # Select default input nodes if nothing is selected yet to save a few clicks for the user
-    if not self._parameterNode.GetNodeReference("InputVolume"):
-      firstVolumeNode = slicer.mrmlScene.GetFirstNodeByClass("vtkMRMLScalarVolumeNode")
-      if firstVolumeNode:
-        self._parameterNode.SetNodeReferenceID("InputVolume", firstVolumeNode.GetID())
+    if not self._parameterNode.GetNodeReference("InputModel"):
+      firstModelNode = slicer.mrmlScene.GetFirstNodeByClass("vtkMRMLModelNode")
+      if firstModelNode:
+        self._parameterNode.SetNodeReferenceID("InputModel", firstModelNode.GetID())
+    
 
   def setParameterNode(self, inputParameterNode):
     """
@@ -216,6 +221,11 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
 
     # Initial GUI update
     self.updateGUIFromParameterNode()
+  
+  def updateGUIFromParameterNode(self, caller=None, event=None):
+    if self._parameterNode is None:
+      return
+    self.ui.applyButton.enabled = self._parameterNode.GetNodeReference("InputModel")
 
   def updateGUIFromParameterNode(self, caller=None, event=None):
     """
@@ -230,19 +240,23 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
     self._updatingGUIFromParameterNode = True
 
     # Update node selectors and sliders
-    self.ui.inputSelector.setCurrentNode(self._parameterNode.GetNodeReference("InputVolume"))
-    self.ui.outputSelector.setCurrentNode(self._parameterNode.GetNodeReference("OutputVolume"))
-    self.ui.invertedOutputSelector.setCurrentNode(self._parameterNode.GetNodeReference("OutputVolumeInverse"))
-    self.ui.imageThresholdSliderWidget.value = float(self._parameterNode.GetParameter("Threshold"))
-    self.ui.invertOutputCheckBox.checked = (self._parameterNode.GetParameter("Invert") == "true")
-
+    self.ui.modelSelector.setCurrentNode(self._parameterNode.GetNodeReference("InputModel"))
+    self.ui.tipSelector.setCurrentNode(self._parameterNode.GetNodeReference("ProbeTip"))
+    self.ui.outputSelector.setCurrentNode(self._parameterNode.GetNodeReference("OutputPoints"))
+    
     # Update buttons states and tooltips
-    if self._parameterNode.GetNodeReference("InputVolume") and self._parameterNode.GetNodeReference("OutputVolume"):
+    if self._parameterNode.GetNodeReference("InputModel") and self._parameterNode.GetNodeReference("OutputPoints"):
       self.ui.applyButton.toolTip = "Compute output volume"
       self.ui.applyButton.enabled = True
     else:
       self.ui.applyButton.toolTip = "Select input and output volume nodes"
       self.ui.applyButton.enabled = False
+
+    if self.ui.applyButton.enabled == True:
+      self.ui.stopButton.toolTip = "Stop collecting points"
+      self.ui.stopButton.enabled = True
+    else:
+      self.ui.stopButton.enabled = False
 
     # All the GUI updates are done
     self._updatingGUIFromParameterNode = False
@@ -258,13 +272,26 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
 
     wasModified = self._parameterNode.StartModify()  # Modify all properties in a single batch
 
-    self._parameterNode.SetNodeReferenceID("InputVolume", self.ui.inputSelector.currentNodeID)
-    self._parameterNode.SetNodeReferenceID("OutputVolume", self.ui.outputSelector.currentNodeID)
-    self._parameterNode.SetParameter("Threshold", str(self.ui.imageThresholdSliderWidget.value))
-    self._parameterNode.SetParameter("Invert", "true" if self.ui.invertOutputCheckBox.checked else "false")
-    self._parameterNode.SetNodeReferenceID("OutputVolumeInverse", self.ui.invertedOutputSelector.currentNodeID)
+    self._parameterNode.SetNodeReferenceID("InputModel", self.ui.modelSelector.currentNodeID)
+    self._parameterNode.SetNodeReferenceID("ProbeTip", self.ui.tipSelector.currentNodeID)
+    self._parameterNode.SetNodeReferenceID("OutputPoints", self.ui.outputSelector.currentNodeID)
+    
+
 
     self._parameterNode.EndModify(wasModified)
+    
+  def onEnableAutoUpdate(self, autoUpdate):
+    if self.markupsObserverTag:
+      self.observedMarkupNode.RemoveObserver(self.markupsObserverTag)
+      self.observedMarkupNode = None
+      self.markupsObserverTag = None
+    if autoUpdate and self.ui.tipSelector.currentNode:
+      self.observedMarkupNode = self.ui.tipSelector.currentNode()
+      self.markupsObserverTag = self.observedMarkupNode.AddObserver(
+      slicer.vtkMRMLMarkupsNode.PointModifiedEvent, self.onMarkupsUpdated)
+  
+  def onMarkupsUpdated(self, caller=None, event=None):
+    self.onApplyButton()
 
   def onApplyButton(self):
     """
@@ -272,15 +299,20 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
     """
     with slicer.util.tryWithErrorDisplay("Failed to compute results.", waitCursor=True):
 
-      # Compute output
-      self.logic.process(self.ui.inputSelector.currentNode(), self.ui.outputSelector.currentNode(),
-        self.ui.imageThresholdSliderWidget.value, self.ui.invertOutputCheckBox.checked)
+      self.logic.process(self.ui.modelSelector.currentNode(),
+      self.ui.tipSelector.currentNode(), 
+      self.ui.outputSelector.currentNode())
+  
+  def onStopButton(self):
+    """
+    Run processing when user clicks "Stop" button.
+    """
+    with slicer.util.tryWithErrorDisplay("Failed to compute results.", waitCursor=True):
 
-      # Compute inverted output (if needed)
-      if self.ui.invertedOutputSelector.currentNode():
-        # If additional output volume is selected then result with inverted threshold is written there
-        self.logic.process(self.ui.inputSelector.currentNode(), self.ui.invertedOutputSelector.currentNode(),
-          self.ui.imageThresholdSliderWidget.value, not self.ui.invertOutputCheckBox.checked, showResult=False)
+      #stop collecting
+      self.ui.autoUpdateCheckBox.checked = False
+      self.removeObservers()
+      print("should stop")
 
 
 #
@@ -311,38 +343,32 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
       parameterNode.SetParameter("Threshold", "100.0")
     if not parameterNode.GetParameter("Invert"):
       parameterNode.SetParameter("Invert", "false")
+  
+  def placePoints(seft, probeTip, outputPoints):
+    import numpy as np
 
-  def process(self, inputVolume, outputVolume, imageThreshold, invert=False, showResult=True):
+    # TODO: change for when there is more than 1 point on tip
+    pos = np.zeros(3)
+    probeTip.GetNthFiducialPosition(0,pos)
+    # Hey Olivia! How is your lunch?
+    # AGGG
+    n = outputPoints.AddControlPoint(pos)
+    trans = slicer.util.getNode("probeModelToProbe")
+    outputPoints.SetAndObserveTransformNodeID(trans.GetID())
+    # set the visibility flag
+    outputPoints.SetNthControlPointVisibility(n, 1)
+
+
+  def process(self, inputModel, probeTip, outputPoints, showResult=True):
     """
-    Run the processing algorithm.
+    Run the processing algorithm.s
     Can be used without GUI widget.
-    :param inputVolume: volume to be thresholded
-    :param outputVolume: thresholding result
-    :param imageThreshold: values above/below this threshold will be set to 0
-    :param invert: if True then values above the threshold will be set to 0, otherwise values below are set to 0
+    :param inputModel: US probe 
+    :param outputPoints: scanned point cloud
     :param showResult: show output volume in slice viewers
     """
 
-    if not inputVolume or not outputVolume:
-      raise ValueError("Input or output volume is invalid")
-
-    import time
-    startTime = time.time()
-    logging.info('Processing started')
-
-    # Compute the thresholded output volume using the "Threshold Scalar Volume" CLI module
-    cliParams = {
-      'InputVolume': inputVolume.GetID(),
-      'OutputVolume': outputVolume.GetID(),
-      'ThresholdValue' : imageThreshold,
-      'ThresholdType' : 'Above' if invert else 'Below'
-      }
-    cliNode = slicer.cli.run(slicer.modules.thresholdscalarvolume, None, cliParams, wait_for_completion=True, update_display=showResult)
-    # We don't need the CLI module node anymore, remove it to not clutter the scene with it
-    slicer.mrmlScene.RemoveNode(cliNode)
-
-    stopTime = time.time()
-    logging.info(f'Processing completed in {stopTime-startTime:.2f} seconds')
+    self.points = self.placePoints(probeTip, outputPoints)
 
 
 #
@@ -385,14 +411,15 @@ class US_Cavity_ReconstructionTest(ScriptedLoadableModuleTest):
 
     import SampleData
     registerSampleData()
-    inputVolume = SampleData.downloadSample('US_Cavity_Reconstruction1')
+    inputModel = SampleData.downloadSample('US_Cavity_Reconstruction1')
     self.delayDisplay('Loaded test data set')
 
-    inputScalarRange = inputVolume.GetImageData().GetScalarRange()
+    inputScalarRange = inputModel.GetImageData().GetScalarRange()
     self.assertEqual(inputScalarRange[0], 0)
     self.assertEqual(inputScalarRange[1], 695)
 
-    outputVolume = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
+    probeTip = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsFiducialNode")
+    outputPoints = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsFiducialNode")
     threshold = 100
 
     # Test the module logic
@@ -400,14 +427,14 @@ class US_Cavity_ReconstructionTest(ScriptedLoadableModuleTest):
     logic = US_Cavity_ReconstructionLogic()
 
     # Test algorithm with non-inverted threshold
-    logic.process(inputVolume, outputVolume, threshold, True)
-    outputScalarRange = outputVolume.GetImageData().GetScalarRange()
+    logic.process(inputModel, outputPoints, threshold, True)
+    outputScalarRange = outputPoints.GetImageData().GetScalarRange()
     self.assertEqual(outputScalarRange[0], inputScalarRange[0])
     self.assertEqual(outputScalarRange[1], threshold)
 
     # Test algorithm with inverted threshold
-    logic.process(inputVolume, outputVolume, threshold, False)
-    outputScalarRange = outputVolume.GetImageData().GetScalarRange()
+    logic.process(inputModel, outputPoints, threshold, False)
+    outputScalarRange = outputPoints.GetImageData().GetScalarRange()
     self.assertEqual(outputScalarRange[0], inputScalarRange[0])
     self.assertEqual(outputScalarRange[1], inputScalarRange[1])
 
