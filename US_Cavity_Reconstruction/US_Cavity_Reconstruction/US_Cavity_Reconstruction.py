@@ -305,7 +305,7 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
   
   def onStopButton(self):
     """
-    Run processing when user clicks "Stop" button.
+    Stop running processing when user clicks "Stop" button.
     """
     with slicer.util.tryWithErrorDisplay("Failed to compute results.", waitCursor=True):
 
