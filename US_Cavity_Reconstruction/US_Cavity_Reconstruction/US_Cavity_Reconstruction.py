@@ -347,6 +347,8 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
   def placePoints(seft, probeTip, outputPoints):
     import numpy as np
 
+    #cavity = getNode("MarkupsFiducial")
+
     # TODO: change for when there is more than 1 point on tip
     pos = np.zeros(3)
     probeTip.GetNthFiducialPosition(0,pos)
@@ -355,6 +357,10 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
     n = outputPoints.AddControlPoint(pos)
     trans = slicer.util.getNode("probeModelToProbe")
     outputPoints.SetAndObserveTransformNodeID(trans.GetID())
+    outputPoints.HardenTransform()
+
+
+    #outputPoints.SetNthControlPointLocked(n, True)
     # set the visibility flag
     outputPoints.SetNthControlPointVisibility(n, 1)
 
