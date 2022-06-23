@@ -4,7 +4,7 @@ import vtk
 import slicer
 from slicer.ScriptedLoadableModule import *
 from slicer.util import VTKObservationMixin
-
+from time import sleep
 
 #
 # US_Cavity_Reconstruction
@@ -128,6 +128,8 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
 
     # Connections
 
+    #self.MarkupsToModelLogic=slicer.modules.markupstomodel.logic()
+
     # These connections ensure that we update parameter node when scene is closed
     self.addObserver(slicer.mrmlScene, slicer.mrmlScene.StartCloseEvent, self.onSceneStartClose)
     self.addObserver(slicer.mrmlScene, slicer.mrmlScene.EndCloseEvent, self.onSceneEndClose)
@@ -137,15 +139,18 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
     self.ui.modelSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
     self.ui.tipSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
     self.ui.outputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
+    self.ui.timerSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
 
     # auto update checkbox
-    self.observedMarkupNode = None
-    self.markupsObserverTag = None
+    self.observedTransformNode = None
+    self.transformObserverTag = None
     self.ui.autoUpdateCheckBox.connect("toggled(bool)", self.onEnableAutoUpdate)
+    self.ui.autoUpdateCheckBox.hide()
 
     # Buttons
     self.ui.applyButton.connect('clicked(bool)', self.onApplyButton)
     self.ui.stopButton.connect('clicked(bool)', self.onStopButton)
+    self.ui.generateModel.connect('clicked(bool)', self.onGenerateButton)
 
     # Make sure parameter node is initialized (needed for module reload)
     self.initializeParameterNode()
@@ -226,6 +231,7 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
     if self._parameterNode is None:
       return
     self.ui.applyButton.enabled = self._parameterNode.GetNodeReference("InputModel")
+    self.ui.generateModel.enabled = self._parameterNode.GetNodeReference("OutputPoints")
 
   def updateGUIFromParameterNode(self, caller=None, event=None):
     """
@@ -243,6 +249,7 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
     self.ui.modelSelector.setCurrentNode(self._parameterNode.GetNodeReference("InputModel"))
     self.ui.tipSelector.setCurrentNode(self._parameterNode.GetNodeReference("ProbeTip"))
     self.ui.outputSelector.setCurrentNode(self._parameterNode.GetNodeReference("OutputPoints"))
+    #self.ui.timerSelector.setCurrentNode(self._parameterNode.GetNodeReference("TimerSeconds"))
     
     # Update buttons states and tooltips
     if self._parameterNode.GetNodeReference("InputModel") and self._parameterNode.GetNodeReference("OutputPoints"):
@@ -251,12 +258,6 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
     else:
       self.ui.applyButton.toolTip = "Select input and output volume nodes"
       self.ui.applyButton.enabled = False
-
-    if self.ui.applyButton.enabled == True:
-      self.ui.stopButton.toolTip = "Stop collecting points"
-      self.ui.stopButton.enabled = True
-    else:
-      self.ui.stopButton.enabled = False
 
     # All the GUI updates are done
     self._updatingGUIFromParameterNode = False
@@ -275,23 +276,23 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
     self._parameterNode.SetNodeReferenceID("InputModel", self.ui.modelSelector.currentNodeID)
     self._parameterNode.SetNodeReferenceID("ProbeTip", self.ui.tipSelector.currentNodeID)
     self._parameterNode.SetNodeReferenceID("OutputPoints", self.ui.outputSelector.currentNodeID)
-    
+    #self._parameterNode.SetNodeReferenceID("TimerSeconds", self.ui.timerSelector.currentNodeID)
 
 
     self._parameterNode.EndModify(wasModified)
     
   def onEnableAutoUpdate(self, autoUpdate):
-    if self.markupsObserverTag:
-      self.observedMarkupNode.RemoveObserver(self.markupsObserverTag)
-      self.observedMarkupNode = None
-      self.markupsObserverTag = None
-    if autoUpdate and self.ui.tipSelector.currentNode:
-      self.observedMarkupNode = self.ui.tipSelector.currentNode()
-      self.markupsObserverTag = self.observedMarkupNode.AddObserver(
-      slicer.vtkMRMLMarkupsNode.PointModifiedEvent, self.onMarkupsUpdated)
+    if self.transformObserverTag:
+      self.observedTransformNode.RemoveObserver(self.transformObserverTag)
+      self.observedTransformNode = None
+      self.transformObserverTag = None
+
+    if autoUpdate: 
+      self.observedTransformNode = slicer.util.getNode("ProbeToTracker")
+      self.transformObserverTag = self.observedTransformNode.AddObserver(slicer.vtkMRMLTransformNode.TransformModifiedEvent, self.onTransformNodeModified)
   
-  def onMarkupsUpdated(self, caller=None, event=None):
-    self.onApplyButton()
+  def onTransformNodeModified(self, caller=None, event=None):
+    self.collectedPoints = self.logic.placePoint(self.ui.tipSelector.currentNode(), self.ui.outputSelector.currentNode())
 
   def onApplyButton(self):
     """
@@ -299,9 +300,23 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
     """
     with slicer.util.tryWithErrorDisplay("Failed to compute results.", waitCursor=True):
 
-      self.logic.process(self.ui.modelSelector.currentNode(),
-      self.ui.tipSelector.currentNode(), 
-      self.ui.outputSelector.currentNode())
+      t = self.ui.timerSelector.value
+
+      self.ui.countdownValueLabel.text = str(t)
+      self.ui.applyButton.enabled = False
+      self.ui.stopButton.enabled = True
+      
+      # TODO: fix so it shows in UI!
+      while t:
+        sleep(1)
+        t -= 1
+        self.ui.countdownValueLabel.text = str(t)
+      
+      t = slicer.util.getNode("RetractorToTracker")
+      self.ui.outputSelector.currentNode().SetAndObserveTransformNodeID(t.GetID())
+      
+      self.ui.autoUpdateCheckBox.checked = True
+      self.collectedPoints = self.logic.placePoint(self.ui.tipSelector.currentNode(), self.ui.outputSelector.currentNode())
   
   def onStopButton(self):
     """
@@ -311,9 +326,21 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
 
       #stop collecting
       self.ui.autoUpdateCheckBox.checked = False
-      self.removeObservers()
+      self.ui.applyButton.enabled = True
+      #self.removeObservers()
       print("should stop")
 
+  def onGenerateButton(self):
+    """
+    .
+    """
+    with slicer.util.tryWithErrorDisplay("Failed to compute results.", waitCursor=True):
+
+      self.logic.process(self.ui.modelSelector.currentNode(),
+      self.ui.tipSelector.currentNode(), 
+      self.ui.outputSelector.currentNode())
+
+      
 
 #
 # US_Cavity_ReconstructionLogic
@@ -335,6 +362,8 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
     """
     ScriptedLoadableModuleLogic.__init__(self)
 
+    self.num = 0
+
   def setDefaultParameters(self, parameterNode):
     """
     Initialize parameter node with default settings.
@@ -344,25 +373,196 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
     if not parameterNode.GetParameter("Invert"):
       parameterNode.SetParameter("Invert", "false")
   
-  def placePoints(seft, probeTip, outputPoints):
+  def placePoint(self, probeTip, outputPoints):
     import numpy as np
 
-    #cavity = getNode("MarkupsFiducial")
+    # TODO: transform points to retractor so that they move with the retractor
+  
+    self.num +=1
 
-    # TODO: change for when there is more than 1 point on tip
-    pos = np.zeros(3)
+    for i in range(probeTip.GetNumberOfMarkups()):
+      pos = np.zeros(3)
+      probeTip.GetNthFiducialPosition(i,pos)
+
+      transform = slicer.util.getNode("probeModelToProbe")
+      matrix = transform.GetMatrixTransformToParent()
+      pos = matrix.MultiplyPoint(np.append(pos,1))
+
+      transform2 = slicer.util.getNode("ProbeToRetractor")
+      matrix2 = transform2.GetMatrixTransformToParent()
+      pos = matrix2.MultiplyPoint(pos)
+
+      n = outputPoints.AddControlPoint(pos[:3])
+      outputPoints.SetNthControlPointLabel(n, str(self.num))
+      # set the visibility flag
+      outputPoints.SetNthControlPointVisibility(n, 1)
+
+      return outputPoints
+
+    """pos = np.zeros(3)
     probeTip.GetNthFiducialPosition(0,pos)
-    # Hey Olivia! How is your lunch?
-    # AGGG
-    n = outputPoints.AddControlPoint(pos)
-    trans = slicer.util.getNode("probeModelToProbe")
-    outputPoints.SetAndObserveTransformNodeID(trans.GetID())
-    outputPoints.HardenTransform()
 
+    transform = slicer.util.getNode("probeModelToProbe")
+    matrix = transform.GetMatrixTransformToParent()
+    pos = matrix.MultiplyPoint(np.append(pos,1))
 
-    #outputPoints.SetNthControlPointLocked(n, True)
+    transform2 = slicer.util.getNode("ProbeToTracker")
+    matrix2 = transform2.GetMatrixTransformToParent()
+    pos = matrix2.MultiplyPoint(pos)
+
+    n = outputPoints.AddControlPoint(pos[:3])
+    outputPoints.SetNthControlPointLabel(n, str(self.num))
     # set the visibility flag
-    outputPoints.SetNthControlPointVisibility(n, 1)
+    outputPoints.SetNthControlPointVisibility(n, 1)"""
+
+  """def generatePointCloud(self,outputPoints):
+
+      # hide collected points
+      outputPoints.SetDisplayVisibility(0)
+
+      import numpy as np
+
+      # go through collected point to find the outermost points
+      for i in range(outputPoints.GetNumberOfMarkups()):
+        pos = np.zeros(3)
+        outputPoints.GetNthFiducialPosition(i,pos)
+
+        # initialize values to first point
+        if i == 0:
+          highZ = pos[2]
+          lowZ = pos[2]
+          highZPos = pos
+          lowZPos = pos
+
+          highY = pos[1]
+          lowY = pos[1]
+          highYPos = pos
+          lowYPos = pos
+
+          highX = pos[0]
+          lowX = pos[0]
+          highXPos = pos
+          lowXPos = pos
+        
+        else:
+          if pos[2] > highZ:
+            highZ = pos[2]
+            highZPos = pos
+          if pos[2] < lowZ:
+            lowZ = pos[2]
+            lowZPos = pos
+          
+          if pos[1] > highY:
+            highY = pos[1]
+            highYPos = pos
+          if pos[1] < lowY:
+            lowY = pos[1]
+            lowYPos = pos
+
+          if pos[0] > highX:
+            highX = pos[0]
+            highXPos = pos
+          if pos[0] < lowX:
+            lowX = pos[0]
+            lowXPos = pos
+
+      # create new fuducial list and add/show outermost points
+      pointListNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsFiducialNode")
+      # TODO: change the name of the fudical list
+      pointListNode.SetName("Cavity")
+      n1 = pointListNode.AddControlPoint(highZPos)
+      n2 = pointListNode.AddControlPoint(lowZPos)
+      pointListNode.SetNthControlPointVisibility(n1, 1)
+      pointListNode.SetNthControlPointVisibility(n2, 1)
+
+      n3 = pointListNode.AddControlPoint(highYPos)
+      n4 = pointListNode.AddControlPoint(lowYPos)
+      pointListNode.SetNthControlPointVisibility(n3, 1)
+      pointListNode.SetNthControlPointVisibility(n4, 1)
+
+      n5 = pointListNode.AddControlPoint(highXPos)
+      n6 = pointListNode.AddControlPoint(lowXPos)
+      pointListNode.SetNthControlPointVisibility(n5, 1)
+      pointListNode.SetNthControlPointVisibility(n6, 1)
+
+      return pointListNode"""
+
+  def generateModel(self, pointList, inputModel):
+
+    import numpy as np
+
+    pointList.SetDisplayVisibility(0)
+    """transform = slicer.util.GetNode("RetractorToTracker")
+    pointList.SetAndObserveTransformNodeID(transform.GetID)"""
+
+    pointsForHull = vtk.vtkPoints()
+    
+    for i in range(pointList.GetNumberOfMarkups()):
+        pos = np.zeros(3)
+        pointList.GetNthFiducialPosition(i,pos)
+        pointsForHull.InsertNextPoint(pos)
+
+    hullPolydata = vtk.vtkPolyData()
+    hullPolydata.SetPoints(pointsForHull)
+
+    hull = vtk.vtkDelaunay3D()
+    hull.SetInputData(hullPolydata)
+    hull.Update()
+
+    surfaceFilter = vtk.vtkDataSetSurfaceFilter()
+    surfaceFilter.SetInputConnection(hull.GetOutputPort())
+    surfaceFilter.Update()
+
+    """mapper3D = vtk.vtkPolyDataMapper()
+    mapper3D.SetInputData(surfaceFilter.GetOutput())
+
+    actor3D = vtk.vtkActor()
+    actor3D.SetMapper(mapper3D)"""
+
+    outputModel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode")
+    outputModel.SetAndObservePolyData(surfaceFilter.GetOutput())
+    outputModel.SetName("solidCavity")
+    outputModel.CreateDefaultDisplayNodes()
+    outputModel.GetDisplayNode().SetColor(0,0,1)
+
+    
+    t = slicer.util.getNode("RetractorToTracker")
+    outputModel.SetAndObserveTransformNodeID(t.GetID())
+
+    segmentEditorWidget, segmentEditorNode, segmentationNode, breastID, tumorID = self.setupForSubtract(inputModel)
+    self.subtract_segment(segmentEditorWidget, segmentEditorNode, segmentationNode, breastID, tumorID)
+
+
+  def setupForSubtract(self, inputModel, segmentationNode=None):
+    # TODO: adjust way of getting nodes to be more universal
+
+    inputModel.SetDisplayVisibility(0)
+    
+    segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode")
+    segmentationNode.CreateDefaultDisplayNodes()
+    
+    transform = slicer.util.getNode("retractorModelToRetractor")
+    segmentationNode.SetAndObserveTransformNodeID(transform.GetID())
+
+    slicer.modules.segmentations.logic().ImportModelToSegmentationNode(inputModel, segmentationNode)
+
+    tumor = slicer.util.getNode("solidCavity")
+    tumor.SetDisplayVisibility(0)
+
+    slicer.modules.segmentations.logic().ImportModelToSegmentationNode(tumor, segmentationNode)
+
+    segmentEditorNode = slicer.vtkMRMLSegmentEditorNode()
+    slicer.mrmlScene.AddNode(segmentEditorNode)
+
+    segmentEditorWidget = slicer.qMRMLSegmentEditorWidget()
+    segmentEditorWidget.setMRMLSegmentEditorNode(segmentEditorNode)
+    segmentEditorWidget.setSegmentationNode(segmentationNode)
+    segmentEditorWidget.setMRMLScene(slicer.mrmlScene)
+
+    breastID = segmentationNode.GetSegmentation().GetSegmentIdBySegmentName(inputModel.GetName())
+    tumorID = segmentationNode.GetSegmentation().GetSegmentIdBySegmentName("solidCavity")
+
+    return segmentEditorWidget, segmentEditorNode, segmentationNode, breastID, tumorID
 
 
   def process(self, inputModel, probeTip, outputPoints, showResult=True):
@@ -373,8 +573,35 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
     :param outputPoints: scanned point cloud
     :param showResult: show output volume in slice viewers
     """
+    #self.pointCloud = self.generatePointCloud(outputPoints)
+    self.model = self.generateModel(outputPoints, inputModel)
 
-    self.points = self.placePoints(probeTip, outputPoints)
+  def subtract_segment(self, segmentEditorWidget, segmentEditorNode, segmentationNode, segmentID, to_subtract_segmentID):
+    '''Perform logical subtraction of to_subtract_segmentID from segmentID'''
+    import SegmentEditorEffects
+    
+    segmentEditorWidget.setActiveEffectByName('Logical operators')
+
+    effect = segmentEditorWidget.activeEffect()
+    effect.setParameter("Operation", SegmentEditorEffects.LOGICAL_SUBTRACT)
+    effect.setParameter("BypassMasking",1)
+    effect.setParameter("ModifierSegmentID",to_subtract_segmentID)
+    effect.self().onApply()
+
+    segmentationNode.GetDisplayNode().SetSegmentVisibility(to_subtract_segmentID, 0)
+
+    """shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
+    exportFolderItemId = shNode.CreateFolderItem(shNode.GetSceneItemID(), "Cavity")
+
+    segmentationNode.GetDisplayNode().SetSegmentVisibility(segmentID, 0)
+
+    slicer.modules.segmentations.logic().ExportSegmentsToModels(segmentationNode, segmentID, exportFolderItemId)
+
+"""
+    slicer.mrmlScene.RemoveNode(segmentEditorNode)
+
+
+    
 
 
 #
@@ -426,7 +653,6 @@ class US_Cavity_ReconstructionTest(ScriptedLoadableModuleTest):
 
     probeTip = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsFiducialNode")
     outputPoints = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsFiducialNode")
-    threshold = 100
 
     # Test the module logic
 
