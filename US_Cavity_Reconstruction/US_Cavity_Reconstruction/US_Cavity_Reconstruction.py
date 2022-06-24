@@ -148,6 +148,7 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
     self.ui.autoUpdateCheckBox.hide()
 
     # Buttons
+    self.ui.loadModelsButton.connect('clicked(bool)', self.onloadModelsButton)
     self.ui.applyButton.connect('clicked(bool)', self.onApplyButton)
     self.ui.stopButton.connect('clicked(bool)', self.onStopButton)
     self.ui.generateModel.connect('clicked(bool)', self.onGenerateButton)
@@ -294,6 +295,15 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
   def onTransformNodeModified(self, caller=None, event=None):
     self.collectedPoints = self.logic.placePoint(self.ui.tipSelector.currentNode(), self.ui.outputSelector.currentNode())
 
+  def onloadModelsButton(self):
+    """
+    Run processing when user clicks "Apply" button.
+    """
+    with slicer.util.tryWithErrorDisplay("Failed to compute results.", waitCursor=True):
+      probe = slicer.util.loadModel(os.path.dirname(__file__) +"\Resources\\ExampleModels/built_probe.stl")
+      retractor = slicer.util.loadModel(os.path.dirname(__file__) +"\Resources\\ExampleModels/retractorStand_v3.stl")
+  
+  
   def onApplyButton(self):
     """
     Run processing when user clicks "Apply" button.
@@ -314,7 +324,7 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
       
       t = slicer.util.getNode("RetractorToTracker")
       self.ui.outputSelector.currentNode().SetAndObserveTransformNodeID(t.GetID())
-      
+
       self.ui.autoUpdateCheckBox.checked = True
       self.collectedPoints = self.logic.placePoint(self.ui.tipSelector.currentNode(), self.ui.outputSelector.currentNode())
   
@@ -590,15 +600,23 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
 
     segmentationNode.GetDisplayNode().SetSegmentVisibility(to_subtract_segmentID, 0)
 
+    slicer.mrmlScene.RemoveNode(segmentEditorNode)
+    #slicer.mrmlScene.RemoveNode(segmentEditorWidget)
+
+    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
+    exportFolderItemId = shNode.CreateFolderItem(shNode.GetSceneItemID(), "Cavity")
+    slicer.modules.segmentations.logic().ExportSegmentsToModels(segmentationNode, segmentID, exportFolderItemId)
+
+    slicer.mrmlScene.RemoveNode(segmentationNode)
+
     """shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
     exportFolderItemId = shNode.CreateFolderItem(shNode.GetSceneItemID(), "Cavity")
 
     segmentationNode.GetDisplayNode().SetSegmentVisibility(segmentID, 0)
 
-    slicer.modules.segmentations.logic().ExportSegmentsToModels(segmentationNode, segmentID, exportFolderItemId)
+    slicer.modules.segmentations.logic().ExportSegmentsToModels(segmentationNode, segmentID, exportFolderItemId)"""
 
-"""
-    slicer.mrmlScene.RemoveNode(segmentEditorNode)
+
 
 
     
