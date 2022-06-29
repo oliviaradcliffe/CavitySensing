@@ -1,4 +1,3 @@
-import logging
 import os
 import vtk
 import slicer
@@ -502,8 +501,6 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
     import numpy as np
 
     pointList.SetDisplayVisibility(0)
-    """transform = slicer.util.GetNode("RetractorToTracker")
-    pointList.SetAndObserveTransformNodeID(transform.GetID)"""
 
     pointsForHull = vtk.vtkPoints()
     
@@ -515,19 +512,26 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
     hullPolydata = vtk.vtkPolyData()
     hullPolydata.SetPoints(pointsForHull)
 
-    hull = vtk.vtkDelaunay3D()
-    hull.SetInputData(hullPolydata)
-    hull.Update()
+    delaunay = vtk.vtkDelaunay3D()
+    delaunay.SetInputData(hullPolydata)
+    delaunay.Update()
 
     surfaceFilter = vtk.vtkDataSetSurfaceFilter()
-    surfaceFilter.SetInputConnection(hull.GetOutputPort())
+    surfaceFilter.SetInputConnection(delaunay.GetOutputPort())
     surfaceFilter.Update()
 
-    """mapper3D = vtk.vtkPolyDataMapper()
-    mapper3D.SetInputData(surfaceFilter.GetOutput())
+    subdivisionFilter = vtk.vtkButterflySubdivisionFilter()
+    subdivisionFilter.SetInputConnection(surfaceFilter.GetOutputPort())
+    subdivisionFilter.SetNumberOfSubdivisions(3)
+    subdivisionFilter.Update()
 
-    actor3D = vtk.vtkActor()
-    actor3D.SetMapper(mapper3D)"""
+    convexHull = vtk.vtkDelaunay3D()
+    convexHull.SetInputConnection(subdivisionFilter.GetOutputPort())
+    convexHull.Update()
+
+    surfaceFilter = vtk.vtkDataSetSurfaceFilter()
+    surfaceFilter.SetInputData(convexHull.GetOutput())
+    surfaceFilter.Update()
 
     outputModel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode")
     outputModel.SetAndObservePolyData(surfaceFilter.GetOutput())
@@ -538,6 +542,9 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
     
     t = slicer.util.getNode("RetractorToTracker")
     outputModel.SetAndObserveTransformNodeID(t.GetID())
+
+    breast = slicer.util.loadModel(os.path.dirname(__file__) +"\Resources\\ExampleModels/breastPhantomSTL.stl")
+  
 
     segmentEditorWidget, segmentEditorNode, segmentationNode, breastID, tumorID = self.setupForSubtract(inputModel)
     self.subtract_segment(segmentEditorWidget, segmentEditorNode, segmentationNode, breastID, tumorID)
@@ -601,13 +608,8 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
     segmentationNode.GetDisplayNode().SetSegmentVisibility(to_subtract_segmentID, 0)
 
     slicer.mrmlScene.RemoveNode(segmentEditorNode)
-    #slicer.mrmlScene.RemoveNode(segmentEditorWidget)
 
-    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
-    exportFolderItemId = shNode.CreateFolderItem(shNode.GetSceneItemID(), "Cavity")
-    slicer.modules.segmentations.logic().ExportSegmentsToModels(segmentationNode, segmentID, exportFolderItemId)
-
-    slicer.mrmlScene.RemoveNode(segmentationNode)
+    #slicer.mrmlScene.RemoveNode(segmentationNode)
 
     """shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
     exportFolderItemId = shNode.CreateFolderItem(shNode.GetSceneItemID(), "Cavity")
