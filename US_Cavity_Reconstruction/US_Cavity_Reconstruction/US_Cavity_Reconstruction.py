@@ -509,6 +509,12 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
         pointList.GetNthFiducialPosition(i,pos)
         pointsForHull.InsertNextPoint(pos)
 
+        if i == 0:
+          highestZ = pos[2]
+        else:
+          if pos[2] > highestZ:
+            highestZ = pos[2]
+
     hullPolydata = vtk.vtkPolyData()
     hullPolydata.SetPoints(pointsForHull)
 
@@ -543,10 +549,25 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
     t = slicer.util.getNode("RetractorToTracker")
     outputModel.SetAndObserveTransformNodeID(t.GetID())
 
-    breast = slicer.util.loadModel(os.path.dirname(__file__) +"\Resources\\ExampleModels/breastPhantomSTL.stl")
+    breast = slicer.util.loadModel(os.path.dirname(__file__) +"\Resources\\ExampleModels/breastPhantom.stl")
+
+    bTransform = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTransformNode")
+    matrix = vtk.vtkMatrix4x4()
+    matrix.SetElement(0, 0, -1.28)
+    matrix.SetElement(1, 1, 1.0)
+    matrix.SetElement(2, 2, -1.28)
+    matrix.SetElement(0, 2, -0.1)
+    matrix.SetElement(2, 0, 0.1)
+    matrix.SetElement(0, 3, 11.35)
+    matrix.SetElement(1, 3, 51.0)
+    matrix.SetElement(2, 3, highestZ*2.4)
+    bTransform.SetMatrixTransformToParent(matrix)
+
+    breast.SetAndObserveTransformNodeID(bTransform.GetID())
+    bTransform.SetAndObserveTransformNodeID(t.GetID())
   
 
-    segmentEditorWidget, segmentEditorNode, segmentationNode, breastID, tumorID = self.setupForSubtract(inputModel)
+    segmentEditorWidget, segmentEditorNode, segmentationNode, breastID, tumorID = self.setupForSubtract(breast)
     self.subtract_segment(segmentEditorWidget, segmentEditorNode, segmentationNode, breastID, tumorID)
 
 
@@ -606,17 +627,20 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
     effect.self().onApply()
 
     segmentationNode.GetDisplayNode().SetSegmentVisibility(to_subtract_segmentID, 0)
+    segmentationNode.RemoveSegment(to_subtract_segmentID)
 
     slicer.mrmlScene.RemoveNode(segmentEditorNode)
 
-    #slicer.mrmlScene.RemoveNode(segmentationNode)
+    
 
     """shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
     exportFolderItemId = shNode.CreateFolderItem(shNode.GetSceneItemID(), "Cavity")
 
     segmentationNode.GetDisplayNode().SetSegmentVisibility(segmentID, 0)
 
-    slicer.modules.segmentations.logic().ExportSegmentsToModels(segmentationNode, segmentID, exportFolderItemId)"""
+    slicer.modules.segmentations.logic().ExportSegmentsToModels(segmentationNode, segmentID, exportFolderItemId)
+    
+    slicer.mrmlScene.RemoveNode(segmentationNode)"""
 
 
 
