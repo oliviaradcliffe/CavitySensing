@@ -546,28 +546,32 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
     outputModel.GetDisplayNode().SetColor(0,0,1)
 
     
-    t = slicer.util.getNode("RetractorToTracker")
-    outputModel.SetAndObserveTransformNodeID(t.GetID())
+    retractorToTrackerNode = slicer.util.getNode("RetractorToTracker")
+    outputModel.SetAndObserveTransformNodeID(retractorToTrackerNode.GetID())
 
-    breast = slicer.util.loadModel(os.path.dirname(__file__) +"\Resources\\ExampleModels/breastPhantom.stl")
+    breastModel = slicer.util.loadModel(os.path.dirname(__file__) +"\Resources\\ExampleModels/breastPhantom.stl")
 
-    bTransform = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTransformNode")
-    matrix = vtk.vtkMatrix4x4()
-    matrix.SetElement(0, 0, -1.28)
-    matrix.SetElement(1, 1, 1.0)
-    matrix.SetElement(2, 2, -1.28)
-    matrix.SetElement(0, 2, -0.1)
-    matrix.SetElement(2, 0, 0.1)
-    matrix.SetElement(0, 3, 11.35)
-    matrix.SetElement(1, 3, 51.0)
-    matrix.SetElement(2, 3, highestZ*2.4)
-    bTransform.SetMatrixTransformToParent(matrix)
+    cavityTopToRetractorNode = slicer.mrmlScene.GetFirstNodeByName("CavityTopToRetractor")
+    if cavityTopToRetractorNode is None:
+      breastPhantomToRetractorFilename = os.path.dirname(__file__) + "\Resources\\CavityTopToRetractor.h5"
+      cavityTopToRetractorNode = slicer.util.loadTransform(breastPhantomToRetractorFilename)
 
-    breast.SetAndObserveTransformNodeID(bTransform.GetID())
-    bTransform.SetAndObserveTransformNodeID(t.GetID())
+    breastPhantomToCavityTopNode = slicer.mrmlScene.GetFirstNodeByName("BreastPhantomToCavityTop")
+    if breastPhantomToCavityTopNode is None:
+      breastPhantomToCavityTopNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLinearTransformNode", "BreastPhantomToCavityTop")
+
+    """ like this:
+    transform2 = vtk.vtkTransform()
+    trasnform2.Translate(0, 0, h)
+    breastPhantomToCavityTopNode.SetMatrixTransformToParent(transform2.GetMatrix())
+    """
+
+    breastModel.SetAndObserveTransformNodeID(breastPhantomToCavityTopNode.GetID())
+    breastPhantomToCavityTopNode.SetAndObserveTransformNodeID(cavityTopToRetractorNode.GetID())
+    cavityTopToRetractorNode.SetAndObserveTransformNodeID(retractorToTrackerNode.GetID())
   
 
-    segmentEditorWidget, segmentEditorNode, segmentationNode, breastID, tumorID = self.setupForSubtract(breast)
+    segmentEditorWidget, segmentEditorNode, segmentationNode, breastID, tumorID = self.setupForSubtract(breastModel)
     self.subtract_segment(segmentEditorWidget, segmentEditorNode, segmentationNode, breastID, tumorID)
 
 
