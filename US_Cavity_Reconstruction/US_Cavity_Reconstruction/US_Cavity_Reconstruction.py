@@ -336,13 +336,9 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
       #stop collecting
       self.ui.autoUpdateCheckBox.checked = False
       self.ui.applyButton.enabled = True
-      #self.removeObservers()
-      print("should stop")
 
   def onGenerateButton(self):
-    """
-    .
-    """
+    
     with slicer.util.tryWithErrorDisplay("Failed to compute results.", waitCursor=True):
 
       self.logic.process(self.ui.modelSelector.currentNode(),
@@ -509,11 +505,14 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
         pointList.GetNthFiducialPosition(i,pos)
         pointsForHull.InsertNextPoint(pos)
 
+        #print("pos[2]", pos[2])
         if i == 0:
           highestZ = pos[2]
+          #print("i = 0, pos[2] = ", pos[2])
         else:
           if pos[2] > highestZ:
             highestZ = pos[2]
+            #print("highestZ", highestZ)
 
     hullPolydata = vtk.vtkPolyData()
     hullPolydata.SetPoints(pointsForHull)
@@ -539,9 +538,10 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
     surfaceFilter.SetInputData(convexHull.GetOutput())
     surfaceFilter.Update()
 
-    outputModel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode")
+    outputModel = slicer.mrmlScene.GetFirstNodeByName("solidCavity")
+    if outputModel is None:
+      outputModel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "solidCavity")
     outputModel.SetAndObservePolyData(surfaceFilter.GetOutput())
-    outputModel.SetName("solidCavity")
     outputModel.CreateDefaultDisplayNodes()
     outputModel.GetDisplayNode().SetColor(0,0,1)
 
@@ -559,6 +559,12 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
     breastPhantomToCavityTopNode = slicer.mrmlScene.GetFirstNodeByName("BreastPhantomToCavityTop")
     if breastPhantomToCavityTopNode is None:
       breastPhantomToCavityTopNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLinearTransformNode", "BreastPhantomToCavityTop")
+
+    #print("highestZ: ", highestZ)
+    # TODO: use a better technique other than multiplying by 2 for the phantom height
+    breastPhantomToCavityTopTransform = vtk.vtkTransform()
+    breastPhantomToCavityTopTransform.Translate(0, 0, -highestZ*2)
+    breastPhantomToCavityTopNode.SetMatrixTransformToParent(breastPhantomToCavityTopTransform.GetMatrix())
 
     """ like this:
     transform2 = vtk.vtkTransform()
@@ -580,7 +586,9 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
 
     inputModel.SetDisplayVisibility(0)
     
-    segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode")
+    segmentationNode = slicer.mrmlScene.GetFirstNodeByName("CavitySegmentation")
+    if segmentationNode is None:
+      segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", "CavitySegmentation")
     segmentationNode.CreateDefaultDisplayNodes()
     
     transform = slicer.util.getNode("retractorModelToRetractor")
@@ -635,17 +643,19 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
 
     slicer.mrmlScene.RemoveNode(segmentEditorNode)
 
-    
+    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
+    exportFolderItemId = shNode.CreateFolderItem(shNode.GetSceneItemID(), "CavityVisualization")
+    slicer.modules.segmentations.logic().ExportAllSegmentsToModels(segmentationNode, exportFolderItemId)
 
-    """shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
-    exportFolderItemId = shNode.CreateFolderItem(shNode.GetSceneItemID(), "Cavity")
+    self.removeSegmentation(segmentationNode, segmentID)
 
+  def removeSegmentation(self, segmentationNode, segmentID):
     segmentationNode.GetDisplayNode().SetSegmentVisibility(segmentID, 0)
-
-    slicer.modules.segmentations.logic().ExportSegmentsToModels(segmentationNode, segmentID, exportFolderItemId)
+    segmentationDisplay = slicer.util.getNode("SegmentationDisplay")
     
-    slicer.mrmlScene.RemoveNode(segmentationNode)"""
-
+    slicer.mrmlScene.RemoveNode(segmentationDisplay)
+    slicer.mrmlScene.RemoveNode(segmentationNode)
+    
 
 
 
