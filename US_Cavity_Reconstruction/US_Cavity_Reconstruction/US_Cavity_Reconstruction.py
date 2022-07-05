@@ -135,7 +135,6 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
 
     # These connections ensure that whenever user changes some settings on the GUI, that is saved in the MRML scene
     # (in the selected parameter node).
-    self.ui.modelSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
     self.ui.tipSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
     self.ui.outputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
     self.ui.timerSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
@@ -199,12 +198,13 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
 
     self.setParameterNode(self.logic.getParameterNode())
 
+    #TODO: delete below if not needed
     # Select default input nodes if nothing is selected yet to save a few clicks for the user
-    if not self._parameterNode.GetNodeReference("InputModel"):
+    """ if not self._parameterNode.GetNodeReference("InputModel"):
       firstModelNode = slicer.mrmlScene.GetFirstNodeByClass("vtkMRMLModelNode")
       if firstModelNode:
         self._parameterNode.SetNodeReferenceID("InputModel", firstModelNode.GetID())
-    
+    """
 
   def setParameterNode(self, inputParameterNode):
     """
@@ -230,7 +230,7 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
   def updateGUIFromParameterNode(self, caller=None, event=None):
     if self._parameterNode is None:
       return
-    self.ui.applyButton.enabled = self._parameterNode.GetNodeReference("InputModel")
+    self.ui.applyButton.enabled = self._parameterNode.GetNodeReference("OutputPoints")
     self.ui.generateModel.enabled = self._parameterNode.GetNodeReference("OutputPoints")
 
   def updateGUIFromParameterNode(self, caller=None, event=None):
@@ -246,17 +246,16 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
     self._updatingGUIFromParameterNode = True
 
     # Update node selectors and sliders
-    self.ui.modelSelector.setCurrentNode(self._parameterNode.GetNodeReference("InputModel"))
     self.ui.tipSelector.setCurrentNode(self._parameterNode.GetNodeReference("ProbeTip"))
     self.ui.outputSelector.setCurrentNode(self._parameterNode.GetNodeReference("OutputPoints"))
     #self.ui.timerSelector.setCurrentNode(self._parameterNode.GetNodeReference("TimerSeconds"))
     
     # Update buttons states and tooltips
-    if self._parameterNode.GetNodeReference("InputModel") and self._parameterNode.GetNodeReference("OutputPoints"):
-      self.ui.applyButton.toolTip = "Compute output volume"
+    if self._parameterNode.GetNodeReference("ProbeTip") and self._parameterNode.GetNodeReference("OutputPoints"):
+      self.ui.applyButton.toolTip = "Compute output model"
       self.ui.applyButton.enabled = True
     else:
-      self.ui.applyButton.toolTip = "Select input and output volume nodes"
+      self.ui.applyButton.toolTip = "Select input and output point lists"
       self.ui.applyButton.enabled = False
 
     # All the GUI updates are done
@@ -273,7 +272,6 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
 
     wasModified = self._parameterNode.StartModify()  # Modify all properties in a single batch
 
-    self._parameterNode.SetNodeReferenceID("InputModel", self.ui.modelSelector.currentNodeID)
     self._parameterNode.SetNodeReferenceID("ProbeTip", self.ui.tipSelector.currentNodeID)
     self._parameterNode.SetNodeReferenceID("OutputPoints", self.ui.outputSelector.currentNodeID)
     #self._parameterNode.SetNodeReferenceID("TimerSeconds", self.ui.timerSelector.currentNodeID)
@@ -341,8 +339,7 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
     
     with slicer.util.tryWithErrorDisplay("Failed to compute results.", waitCursor=True):
 
-      self.logic.process(self.ui.modelSelector.currentNode(),
-      self.ui.tipSelector.currentNode(), 
+      self.logic.process(self.ui.tipSelector.currentNode(), 
       self.ui.outputSelector.currentNode())
 
       
@@ -381,21 +378,20 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
   def placePoint(self, probeTip, outputPoints):
     import numpy as np
 
-    # TODO: transform points to retractor so that they move with the retractor
-  
+    # TODO: hide fiducial labels
     self.num +=1
 
     for i in range(probeTip.GetNumberOfMarkups()):
       pos = np.zeros(3)
       probeTip.GetNthFiducialPosition(i,pos)
 
-      transform = slicer.util.getNode("probeModelToProbe")
-      matrix = transform.GetMatrixTransformToParent()
-      pos = matrix.MultiplyPoint(np.append(pos,1))
+      probeModelToProbeNode = slicer.util.getNode("probeModelToProbe")
+      probeModelToProbeMatrix = probeModelToProbeNode.GetMatrixTransformToParent()
+      pos = probeModelToProbeMatrix.MultiplyPoint(np.append(pos,1))
 
-      transform2 = slicer.util.getNode("ProbeToRetractor")
-      matrix2 = transform2.GetMatrixTransformToParent()
-      pos = matrix2.MultiplyPoint(pos)
+      ProbeToRetractorNode = slicer.util.getNode("ProbeToRetractor")
+      ProbeToRetractorMatrix = ProbeToRetractorNode.GetMatrixTransformToParent()
+      pos = ProbeToRetractorMatrix.MultiplyPoint(pos)
 
       n = outputPoints.AddControlPoint(pos[:3])
       outputPoints.SetNthControlPointLabel(n, str(self.num))
@@ -492,17 +488,17 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
 
       return pointListNode"""
 
-  def generateModel(self, pointList, inputModel):
+  def generateModel(self, pointCloud):
 
     import numpy as np
 
-    pointList.SetDisplayVisibility(0)
+    pointCloud.SetDisplayVisibility(0)
 
     pointsForHull = vtk.vtkPoints()
     
-    for i in range(pointList.GetNumberOfMarkups()):
+    for i in range(pointCloud.GetNumberOfMarkups()):
         pos = np.zeros(3)
-        pointList.GetNthFiducialPosition(i,pos)
+        pointCloud.GetNthFiducialPosition(i,pos)
         pointsForHull.InsertNextPoint(pos)
 
         #print("pos[2]", pos[2])
@@ -576,25 +572,24 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
     breastPhantomToCavityTopNode.SetAndObserveTransformNodeID(cavityTopToRetractorNode.GetID())
     cavityTopToRetractorNode.SetAndObserveTransformNodeID(retractorToTrackerNode.GetID())
   
+    return breastModel
+    
 
-    segmentEditorWidget, segmentEditorNode, segmentationNode, breastID, tumorID = self.setupForSubtract(breastModel)
-    self.subtract_segment(segmentEditorWidget, segmentEditorNode, segmentationNode, breastID, tumorID)
 
-
-  def setupForSubtract(self, inputModel, segmentationNode=None):
+  def setupForSubtract(self, breastModel, segmentationNode=None):
     # TODO: adjust way of getting nodes to be more universal
 
-    inputModel.SetDisplayVisibility(0)
+    breastModel.SetDisplayVisibility(0)
     
-    segmentationNode = slicer.mrmlScene.GetFirstNodeByName("CavitySegmentation")
+    #segmentationNode = slicer.mrmlScene.GetFirstNodeByName("CavitySegmentation")
     if segmentationNode is None:
       segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", "CavitySegmentation")
     segmentationNode.CreateDefaultDisplayNodes()
     
-    transform = slicer.util.getNode("retractorModelToRetractor")
-    segmentationNode.SetAndObserveTransformNodeID(transform.GetID())
+    retractorModelToRetractorNode = slicer.util.getNode("retractorModelToRetractor")
+    segmentationNode.SetAndObserveTransformNodeID(retractorModelToRetractorNode.GetID())
 
-    slicer.modules.segmentations.logic().ImportModelToSegmentationNode(inputModel, segmentationNode)
+    slicer.modules.segmentations.logic().ImportModelToSegmentationNode(breastModel, segmentationNode)
 
     tumor = slicer.util.getNode("solidCavity")
     tumor.SetDisplayVisibility(0)
@@ -609,22 +604,24 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
     segmentEditorWidget.setSegmentationNode(segmentationNode)
     segmentEditorWidget.setMRMLScene(slicer.mrmlScene)
 
-    breastID = segmentationNode.GetSegmentation().GetSegmentIdBySegmentName(inputModel.GetName())
+    breastID = segmentationNode.GetSegmentation().GetSegmentIdBySegmentName(breastModel.GetName())
     tumorID = segmentationNode.GetSegmentation().GetSegmentIdBySegmentName("solidCavity")
 
     return segmentEditorWidget, segmentEditorNode, segmentationNode, breastID, tumorID
 
 
-  def process(self, inputModel, probeTip, outputPoints, showResult=True):
+  def process(self, probeTip, outputPoints, showResult=True):
     """
     Run the processing algorithm.s
     Can be used without GUI widget.
-    :param inputModel: US probe 
+    :param probeTip: points on probe tip used for scan
     :param outputPoints: scanned point cloud
     :param showResult: show output volume in slice viewers
     """
     #self.pointCloud = self.generatePointCloud(outputPoints)
-    self.model = self.generateModel(outputPoints, inputModel)
+    self.model = self.generateModel(outputPoints)
+    segmentEditorWidget, segmentEditorNode, segmentationNode, breastID, tumorID = self.setupForSubtract(self.model)
+    self.subtract_segment(segmentEditorWidget, segmentEditorNode, segmentationNode, breastID, tumorID)
 
   def subtract_segment(self, segmentEditorWidget, segmentEditorNode, segmentationNode, segmentID, to_subtract_segmentID):
     '''Perform logical subtraction of to_subtract_segmentID from segmentID'''
@@ -650,8 +647,8 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
     self.removeSegmentation(segmentationNode, segmentID)
 
   def removeSegmentation(self, segmentationNode, segmentID):
-    segmentationNode.GetDisplayNode().SetSegmentVisibility(segmentID, 0)
-    segmentationDisplay = slicer.util.getNode("SegmentationDisplay")
+    segmentationDisplay = segmentationNode.GetDisplayNode()
+    segmentationDisplay.SetSegmentVisibility(segmentID, 0)
     
     slicer.mrmlScene.RemoveNode(segmentationDisplay)
     slicer.mrmlScene.RemoveNode(segmentationNode)
@@ -717,13 +714,13 @@ class US_Cavity_ReconstructionTest(ScriptedLoadableModuleTest):
     logic = US_Cavity_ReconstructionLogic()
 
     # Test algorithm with non-inverted threshold
-    logic.process(inputModel, outputPoints, threshold, True)
+    logic.process(outputPoints, True)
     outputScalarRange = outputPoints.GetImageData().GetScalarRange()
     self.assertEqual(outputScalarRange[0], inputScalarRange[0])
     self.assertEqual(outputScalarRange[1], threshold)
 
     # Test algorithm with inverted threshold
-    logic.process(inputModel, outputPoints, threshold, False)
+    logic.process(outputPoints, False)
     outputScalarRange = outputPoints.GetImageData().GetScalarRange()
     self.assertEqual(outputScalarRange[0], inputScalarRange[0])
     self.assertEqual(outputScalarRange[1], inputScalarRange[1])
