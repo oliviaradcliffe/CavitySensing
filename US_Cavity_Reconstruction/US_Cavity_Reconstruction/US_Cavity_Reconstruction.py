@@ -1,6 +1,7 @@
 import os
 import vtk
 import slicer
+import qt
 from slicer.ScriptedLoadableModule import *
 from slicer.util import VTKObservationMixin
 from time import sleep
@@ -16,7 +17,7 @@ class US_Cavity_Reconstruction(ScriptedLoadableModule):
 
   def __init__(self, parent):
     ScriptedLoadableModule.__init__(self, parent)
-    self.parent.title = "US_Cavity_Reconstruction"  # TODO: make this more human readable by adding spaces
+    self.parent.title = "US Cavity Reconstruction"  # TODO: make this more human readable by adding spaces
     self.parent.categories = ["Examples"]  # TODO: set categories (folders where the module shows up in the module selector)
     self.parent.dependencies = []  # TODO: add here list of module names that this module requires
     self.parent.contributors = ["Olivia Radcliffe (Perk/Medi Lab)"]  # TODO: replace with "Firstname Lastname (Organization)"
@@ -138,7 +139,10 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
     self.ui.tipSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
     self.ui.outputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
     self.ui.timerSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
+    self.ui.accuracyTipSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
+    self.ui.outputPointListSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
 
+    
     # auto update checkbox
     self.observedTransformNode = None
     self.transformObserverTag = None
@@ -147,6 +151,7 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
 
     # Buttons
     self.ui.loadModelsButton.connect('clicked(bool)', self.onloadModelsButton)
+    self.ui.placeTestPointButton.connect('clicked(bool)', self.onPlaceTestPointButton)
     self.ui.applyButton.connect('clicked(bool)', self.onApplyButton)
     self.ui.stopButton.connect('clicked(bool)', self.onStopButton)
     self.ui.generateModel.connect('clicked(bool)', self.onGenerateButton)
@@ -248,6 +253,8 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
     # Update node selectors and sliders
     self.ui.tipSelector.setCurrentNode(self._parameterNode.GetNodeReference("ProbeTip"))
     self.ui.outputSelector.setCurrentNode(self._parameterNode.GetNodeReference("OutputPoints"))
+    self.ui.accuracyTipSelector.setCurrentNode(self._parameterNode.GetNodeReference("TestProbeTip"))
+    self.ui.outputPointListSelector.setCurrentNode(self._parameterNode.GetNodeReference("AccuracyOutputPoint"))
     #self.ui.timerSelector.setCurrentNode(self._parameterNode.GetNodeReference("TimerSeconds"))
     
     # Update buttons states and tooltips
@@ -275,6 +282,8 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
     self._parameterNode.SetNodeReferenceID("ProbeTip", self.ui.tipSelector.currentNodeID)
     self._parameterNode.SetNodeReferenceID("OutputPoints", self.ui.outputSelector.currentNodeID)
     #self._parameterNode.SetNodeReferenceID("TimerSeconds", self.ui.timerSelector.currentNodeID)
+    self._parameterNode.SetNodeReferenceID("TestProbeTip", self.ui.accuracyTipSelector.currentNodeID)
+    self._parameterNode.SetNodeReferenceID("AccuracyOutputPoint", self.ui.outputPointListSelector.currentNodeID)
 
 
     self._parameterNode.EndModify(wasModified)
@@ -300,6 +309,15 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
       probe = slicer.util.loadModel(os.path.dirname(__file__) +"\Resources\\ExampleModels/built_probe.stl")
       retractor = slicer.util.loadModel(os.path.dirname(__file__) +"\Resources\\ExampleModels/retractorStand_v3.stl")
   
+  def onPlaceTestPointButton(self):
+    """
+    Run processing when user clicks "Apply" button.
+    """
+    with slicer.util.tryWithErrorDisplay("Failed to compute results.", waitCursor=True):
+      RetractorToTrackerNode = slicer.util.getNode("RetractorToTracker")
+      self.ui.outputPointListSelector.currentNode().SetAndObserveTransformNodeID(RetractorToTrackerNode.GetID())
+
+      self.logic.placePoint(self.ui.accuracyTipSelector.currentNode(), self.ui.outputPointListSelector.currentNode())
   
   def onApplyButton(self):
     """
@@ -307,24 +325,38 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
     """
     with slicer.util.tryWithErrorDisplay("Failed to compute results.", waitCursor=True):
 
-      t = self.ui.timerSelector.value
+      time = self.ui.timerSelector.value
 
-      self.ui.countdownValueLabel.text = str(t)
+      """self.timer = qt.QTimer()
+      self.timer.timeout.connect(self.timeout())
+      #self.timer.timeout.connect(qt.processOneThing) 
+
+      self.timer.start(time*1000)
+
+"""
+      #self.ui.countdownValueLabel.text = str(self.timer.remainingTime())
+      self.ui.countdownValueLabel.text = str(time)
       self.ui.applyButton.enabled = False
       self.ui.stopButton.enabled = True
       
       # TODO: fix so it shows in UI!
-      while t:
+      while time:
         sleep(1)
-        t -= 1
-        self.ui.countdownValueLabel.text = str(t)
+        time -= 1
+        self.ui.countdownValueLabel.text = str(time)
       
-      t = slicer.util.getNode("RetractorToTracker")
-      self.ui.outputSelector.currentNode().SetAndObserveTransformNodeID(t.GetID())
+      RetractorToTrackerNode = slicer.util.getNode("RetractorToTracker")
+      self.ui.outputSelector.currentNode().SetAndObserveTransformNodeID(RetractorToTrackerNode.GetID())
 
       self.ui.autoUpdateCheckBox.checked = True
       self.collectedPoints = self.logic.placePoint(self.ui.tipSelector.currentNode(), self.ui.outputSelector.currentNode())
-  
+
+  """def timeout(self):
+    if self.timer.remainingTime == 0:
+      self.timer.stop
+    self.ui.countdownValueLabel.text = str(self.timer.remainingTime())
+  """
+
   def onStopButton(self):
     """
     Stop running processing when user clicks "Stop" button.
@@ -557,9 +589,9 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
       breastPhantomToCavityTopNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLinearTransformNode", "BreastPhantomToCavityTop")
 
     #print("highestZ: ", highestZ)
-    # TODO: use a better technique other than multiplying by 2 for the phantom height
+    # TODO: use a better technique other than multiplying by 1.75 for the phantom height
     breastPhantomToCavityTopTransform = vtk.vtkTransform()
-    breastPhantomToCavityTopTransform.Translate(0, 0, -highestZ*2)
+    breastPhantomToCavityTopTransform.Translate(0, 0, -highestZ*1.75)
     breastPhantomToCavityTopNode.SetMatrixTransformToParent(breastPhantomToCavityTopTransform.GetMatrix())
 
     """ like this:
