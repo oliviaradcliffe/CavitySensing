@@ -139,9 +139,7 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
     self.ui.tipSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
     self.ui.outputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
     self.ui.timerSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
-    self.ui.accuracyTipSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
-    self.ui.outputPointListSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
-
+    
     
     # auto update checkbox
     self.observedTransformNode = None
@@ -253,8 +251,6 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
     # Update node selectors and sliders
     self.ui.tipSelector.setCurrentNode(self._parameterNode.GetNodeReference("ProbeTip"))
     self.ui.outputSelector.setCurrentNode(self._parameterNode.GetNodeReference("OutputPoints"))
-    self.ui.accuracyTipSelector.setCurrentNode(self._parameterNode.GetNodeReference("TestProbeTip"))
-    self.ui.outputPointListSelector.setCurrentNode(self._parameterNode.GetNodeReference("AccuracyOutputPoint"))
     #self.ui.timerSelector.setCurrentNode(self._parameterNode.GetNodeReference("TimerSeconds"))
     
     # Update buttons states and tooltips
@@ -282,9 +278,7 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
     self._parameterNode.SetNodeReferenceID("ProbeTip", self.ui.tipSelector.currentNodeID)
     self._parameterNode.SetNodeReferenceID("OutputPoints", self.ui.outputSelector.currentNodeID)
     #self._parameterNode.SetNodeReferenceID("TimerSeconds", self.ui.timerSelector.currentNodeID)
-    self._parameterNode.SetNodeReferenceID("TestProbeTip", self.ui.accuracyTipSelector.currentNodeID)
-    self._parameterNode.SetNodeReferenceID("AccuracyOutputPoint", self.ui.outputPointListSelector.currentNodeID)
-
+    
 
     self._parameterNode.EndModify(wasModified)
     
@@ -314,10 +308,29 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
     Run processing when user clicks "Apply" button.
     """
     with slicer.util.tryWithErrorDisplay("Failed to compute results.", waitCursor=True):
-      RetractorToTrackerNode = slicer.util.getNode("RetractorToTracker")
-      self.ui.outputPointListSelector.currentNode().SetAndObserveTransformNodeID(RetractorToTrackerNode.GetID())
+      import numpy as np
 
-      self.logic.placePoint(self.ui.accuracyTipSelector.currentNode(), self.ui.outputPointListSelector.currentNode())
+      probeTip = self.ui.tipSelector.currentNode()
+
+      pos = np.zeros(3)
+      probeTip.GetNthFiducialPosition(0,pos)
+
+      tip = slicer.mrmlScene.GetFirstNodeByName("tip")
+      if tip is None:
+        tip = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsFiducialNode", "tip")
+      
+      tip.AddControlPoint(pos)
+
+      tip.SetNthControlPointVisibility(0, 0)
+
+      testPoints = slicer.mrmlScene.GetFirstNodeByName("testPoints")
+      if testPoints is None:
+        testPoints = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsFiducialNode", "testPoints")
+
+      RetractorToTrackerNode = slicer.util.getNode("RetractorToTracker")
+      testPoints.SetAndObserveTransformNodeID(RetractorToTrackerNode.GetID())
+
+      self.logic.placePoint(tip, testPoints)
   
   def onApplyButton(self):
     """
