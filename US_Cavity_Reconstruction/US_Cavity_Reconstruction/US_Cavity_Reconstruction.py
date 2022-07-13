@@ -8,7 +8,8 @@ from time import sleep
 
 #
 # US_Cavity_Reconstruction
-#
+# collect multiple points for experiment point and create sphere
+# adjust opacity -
 
 class US_Cavity_Reconstruction(ScriptedLoadableModule):
   """Uses ScriptedLoadableModule base class, available at:
@@ -321,11 +322,12 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
       
       tip.AddControlPoint(pos)
 
-      tip.SetNthControlPointVisibility(0, 0)
+      tip.SetDisplayVisibility(0)
 
       testPoints = slicer.mrmlScene.GetFirstNodeByName("testPoints")
       if testPoints is None:
         testPoints = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsFiducialNode", "testPoints")
+      testPoints.GetDisplayNode().SetSelectedColor(0.3, 0.6, 0.1)
 
       RetractorToTrackerNode = slicer.util.getNode("RetractorToTracker")
       testPoints.SetAndObserveTransformNodeID(RetractorToTrackerNode.GetID())
@@ -423,13 +425,12 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
   def placePoint(self, probeTip, outputPoints):
     import numpy as np
 
-    # TODO: hide fiducial labels
-    self.num +=1
-
     for i in range(probeTip.GetNumberOfMarkups()):
+      # get point position
       pos = np.zeros(3)
       probeTip.GetNthFiducialPosition(i,pos)
 
+      # get and apply probe transforms to point position in retractor coordinates
       probeModelToProbeNode = slicer.util.getNode("probeModelToProbe")
       probeModelToProbeMatrix = probeModelToProbeNode.GetMatrixTransformToParent()
       pos = probeModelToProbeMatrix.MultiplyPoint(np.append(pos,1))
@@ -438,8 +439,10 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
       ProbeToRetractorMatrix = ProbeToRetractorNode.GetMatrixTransformToParent()
       pos = ProbeToRetractorMatrix.MultiplyPoint(pos)
 
+      # add point to output point list
       n = outputPoints.AddControlPoint(pos[:3])
-      outputPoints.SetNthControlPointLabel(n, str(self.num))
+      #outputPoints.SetNthControlPointLabel(n, str(self.num))
+      outputPoints.SetNthControlPointLabel(n, "")
       # set the visibility flag
       outputPoints.SetNthControlPointVisibility(n, 1)
 
@@ -541,19 +544,39 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
 
     pointsForHull = vtk.vtkPoints()
     
+    Zs = []
+
     for i in range(pointCloud.GetNumberOfMarkups()):
         pos = np.zeros(3)
         pointCloud.GetNthFiducialPosition(i,pos)
         pointsForHull.InsertNextPoint(pos)
 
-        #print("pos[2]", pos[2])
+        Zs.append(pos[2])
+        """#print("pos[2]", pos[2])
         if i == 0:
           highestZ = pos[2]
           #print("i = 0, pos[2] = ", pos[2])
         else:
           if pos[2] > highestZ:
             highestZ = pos[2]
-            #print("highestZ", highestZ)
+            #print("highestZ", highestZ)"""
+
+    Zs.sort()
+
+    sum = 0
+
+    for val in Zs[:5]:
+      sum += val
+
+    height = sum/5
+    #height = Zs[0]
+
+    print(height)
+
+    #TODO: measure phantom
+    phantomHeight = 50
+
+    print(-(height+phantomHeight))
 
     hullPolydata = vtk.vtkPolyData()
     hullPolydata.SetPoints(pointsForHull)
@@ -602,9 +625,8 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
       breastPhantomToCavityTopNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLinearTransformNode", "BreastPhantomToCavityTop")
 
     #print("highestZ: ", highestZ)
-    # TODO: use a better technique other than multiplying by 1.75 for the phantom height
     breastPhantomToCavityTopTransform = vtk.vtkTransform()
-    breastPhantomToCavityTopTransform.Translate(0, 0, -highestZ*1.75)
+    breastPhantomToCavityTopTransform.Translate(0, 0, -(height+phantomHeight))
     breastPhantomToCavityTopNode.SetMatrixTransformToParent(breastPhantomToCavityTopTransform.GetMatrix())
 
     """ like this:
