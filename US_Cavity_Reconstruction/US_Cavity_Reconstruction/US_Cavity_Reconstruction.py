@@ -151,6 +151,7 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
     # Buttons
     self.ui.loadModelsButton.connect('clicked(bool)', self.onloadModelsButton)
     self.ui.placeTestPointButton.connect('clicked(bool)', self.onPlaceTestPointButton)
+    self.ui.placeNeedleButton.connect('clicked(bool)', self.onPlaceNeedleButton)
     self.ui.applyButton.connect('clicked(bool)', self.onApplyButton)
     self.ui.stopButton.connect('clicked(bool)', self.onStopButton)
     self.ui.generateModel.connect('clicked(bool)', self.onGenerateButton)
@@ -201,14 +202,6 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
     # so that when the scene is saved and reloaded, these settings are restored.
 
     self.setParameterNode(self.logic.getParameterNode())
-
-    #TODO: delete below if not needed
-    # Select default input nodes if nothing is selected yet to save a few clicks for the user
-    """ if not self._parameterNode.GetNodeReference("InputModel"):
-      firstModelNode = slicer.mrmlScene.GetFirstNodeByClass("vtkMRMLModelNode")
-      if firstModelNode:
-        self._parameterNode.SetNodeReferenceID("InputModel", firstModelNode.GetID())
-    """
 
   def setParameterNode(self, inputParameterNode):
     """
@@ -302,7 +295,7 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
     """
     with slicer.util.tryWithErrorDisplay("Failed to compute results.", waitCursor=True):
       probe = slicer.util.loadModel(os.path.dirname(__file__) +"\Resources\\ExampleModels/built_probe.stl")
-      retractor = slicer.util.loadModel(os.path.dirname(__file__) +"\Resources\\ExampleModels/retractorStand_v3.stl")
+      retractor = slicer.util.loadModel(os.path.dirname(__file__) +"\Resources\\ExampleModels/retractor.stl")
   
   def onPlaceTestPointButton(self):
     """
@@ -328,11 +321,31 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
       if testPoints is None:
         testPoints = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsFiducialNode", "testPoints")
       testPoints.GetDisplayNode().SetSelectedColor(0.3, 0.6, 0.1)
+      testPoints.GetDisplayNode().UseGlyphScaleOff()
+      testPoints.GetDisplayNode().SetGlyphSize(5)
 
       RetractorToTrackerNode = slicer.util.getNode("RetractorToTracker")
       testPoints.SetAndObserveTransformNodeID(RetractorToTrackerNode.GetID())
 
       self.logic.placePoint(tip, testPoints)
+  
+  def onPlaceNeedleButton(self):
+    """
+    Run processing when user clicks "Apply" button.
+    """
+    with slicer.util.tryWithErrorDisplay("Failed to compute results.", waitCursor=True):
+      needleModel = slicer.mrmlScene.GetFirstNodeByName("NeedleModel")
+      transform = needleModel.GetParentTransformNode()
+
+      insertedNeedleModel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode")
+      insertedNeedleModel.CopyContent(needleModel)
+      insertedNeedleModel.CreateDefaultDisplayNodes()
+      insertedNeedleModel.SetDisplayVisibility(1)
+
+      insertedNeedleModel.SetAndObserveTransformNodeID(transform.GetID())
+
+      insertedNeedleModel.HardenTransform()
+      
   
   def onApplyButton(self):
     """
@@ -430,8 +443,9 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
       pos = np.zeros(3)
       probeTip.GetNthFiducialPosition(i,pos)
 
+      #TODO: get transforms that the model are under rather than getting them by name?
       # get and apply probe transforms to point position in retractor coordinates
-      probeModelToProbeNode = slicer.util.getNode("probeModelToProbe")
+      probeModelToProbeNode = slicer.util.getNode("ProbeModelToProbe")
       probeModelToProbeMatrix = probeModelToProbeNode.GetMatrixTransformToParent()
       pos = probeModelToProbeMatrix.MultiplyPoint(np.append(pos,1))
 
@@ -448,136 +462,38 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
 
       return outputPoints
 
-    """pos = np.zeros(3)
-    probeTip.GetNthFiducialPosition(0,pos)
-
-    transform = slicer.util.getNode("probeModelToProbe")
-    matrix = transform.GetMatrixTransformToParent()
-    pos = matrix.MultiplyPoint(np.append(pos,1))
-
-    transform2 = slicer.util.getNode("ProbeToTracker")
-    matrix2 = transform2.GetMatrixTransformToParent()
-    pos = matrix2.MultiplyPoint(pos)
-
-    n = outputPoints.AddControlPoint(pos[:3])
-    outputPoints.SetNthControlPointLabel(n, str(self.num))
-    # set the visibility flag
-    outputPoints.SetNthControlPointVisibility(n, 1)"""
-
-  """def generatePointCloud(self,outputPoints):
-
-      # hide collected points
-      outputPoints.SetDisplayVisibility(0)
-
-      import numpy as np
-
-      # go through collected point to find the outermost points
-      for i in range(outputPoints.GetNumberOfMarkups()):
-        pos = np.zeros(3)
-        outputPoints.GetNthFiducialPosition(i,pos)
-
-        # initialize values to first point
-        if i == 0:
-          highZ = pos[2]
-          lowZ = pos[2]
-          highZPos = pos
-          lowZPos = pos
-
-          highY = pos[1]
-          lowY = pos[1]
-          highYPos = pos
-          lowYPos = pos
-
-          highX = pos[0]
-          lowX = pos[0]
-          highXPos = pos
-          lowXPos = pos
-        
-        else:
-          if pos[2] > highZ:
-            highZ = pos[2]
-            highZPos = pos
-          if pos[2] < lowZ:
-            lowZ = pos[2]
-            lowZPos = pos
-          
-          if pos[1] > highY:
-            highY = pos[1]
-            highYPos = pos
-          if pos[1] < lowY:
-            lowY = pos[1]
-            lowYPos = pos
-
-          if pos[0] > highX:
-            highX = pos[0]
-            highXPos = pos
-          if pos[0] < lowX:
-            lowX = pos[0]
-            lowXPos = pos
-
-      # create new fuducial list and add/show outermost points
-      pointListNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsFiducialNode")
-      # TODO: change the name of the fudical list
-      pointListNode.SetName("Cavity")
-      n1 = pointListNode.AddControlPoint(highZPos)
-      n2 = pointListNode.AddControlPoint(lowZPos)
-      pointListNode.SetNthControlPointVisibility(n1, 1)
-      pointListNode.SetNthControlPointVisibility(n2, 1)
-
-      n3 = pointListNode.AddControlPoint(highYPos)
-      n4 = pointListNode.AddControlPoint(lowYPos)
-      pointListNode.SetNthControlPointVisibility(n3, 1)
-      pointListNode.SetNthControlPointVisibility(n4, 1)
-
-      n5 = pointListNode.AddControlPoint(highXPos)
-      n6 = pointListNode.AddControlPoint(lowXPos)
-      pointListNode.SetNthControlPointVisibility(n5, 1)
-      pointListNode.SetNthControlPointVisibility(n6, 1)
-
-      return pointListNode"""
 
   def generateModel(self, pointCloud):
 
     import numpy as np
 
+    # hide users point cloud
     pointCloud.SetDisplayVisibility(0)
 
     pointsForHull = vtk.vtkPoints()
-    
     Zs = []
 
+    # add z value to zs and positions to hull points
     for i in range(pointCloud.GetNumberOfMarkups()):
         pos = np.zeros(3)
         pointCloud.GetNthFiducialPosition(i,pos)
+
         pointsForHull.InsertNextPoint(pos)
-
         Zs.append(pos[2])
-        """#print("pos[2]", pos[2])
-        if i == 0:
-          highestZ = pos[2]
-          #print("i = 0, pos[2] = ", pos[2])
-        else:
-          if pos[2] > highestZ:
-            highestZ = pos[2]
-            #print("highestZ", highestZ)"""
 
-    Zs.sort()
-
+    # average the 5 highest points to determine heihght of the phantom
+    Zs.sort(reverse=True)
     sum = 0
-
-    for val in Zs[:5]:
+    for val in Zs[:50]:
       sum += val
 
-    height = sum/5
-    #height = Zs[0]
+    height = sum/50
 
     print(height)
 
-    #TODO: measure phantom
     phantomHeight = 50
 
-    print(-(height+phantomHeight))
-
+    # create convex hull of the cavity
     hullPolydata = vtk.vtkPolyData()
     hullPolydata.SetPoints(pointsForHull)
 
@@ -602,6 +518,7 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
     surfaceFilter.SetInputData(convexHull.GetOutput())
     surfaceFilter.Update()
 
+    # create convex hull model
     outputModel = slicer.mrmlScene.GetFirstNodeByName("solidCavity")
     if outputModel is None:
       outputModel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "solidCavity")
@@ -609,60 +526,66 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
     outputModel.CreateDefaultDisplayNodes()
     outputModel.GetDisplayNode().SetColor(0,0,1)
 
-    
+    #TODO: get transform retractor is under rathe rthan by name
+    # transform cavity model to retractor space so that it moves with the retractor
     retractorToTrackerNode = slicer.util.getNode("RetractorToTracker")
     outputModel.SetAndObserveTransformNodeID(retractorToTrackerNode.GetID())
 
+    # load in the breast pphantom model and transform it to the retractor coordinate space and proper height 
     breastModel = slicer.util.loadModel(os.path.dirname(__file__) +"\Resources\\ExampleModels/breastPhantom.stl")
 
+    #breastModel = slicer.util.getNode("breastPhantom_1")
     cavityTopToRetractorNode = slicer.mrmlScene.GetFirstNodeByName("CavityTopToRetractor")
     if cavityTopToRetractorNode is None:
-      breastPhantomToRetractorFilename = os.path.dirname(__file__) + "\Resources\\CavityTopToRetractor.h5"
+      breastPhantomToRetractorFilename = os.path.dirname(__file__) + "\Resources\\CavityTopToRetractor_new_2.h5"
       cavityTopToRetractorNode = slicer.util.loadTransform(breastPhantomToRetractorFilename)
 
+    """
     breastPhantomToCavityTopNode = slicer.mrmlScene.GetFirstNodeByName("BreastPhantomToCavityTop")
     if breastPhantomToCavityTopNode is None:
       breastPhantomToCavityTopNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLinearTransformNode", "BreastPhantomToCavityTop")
 
-    #print("highestZ: ", highestZ)
     breastPhantomToCavityTopTransform = vtk.vtkTransform()
-    breastPhantomToCavityTopTransform.Translate(0, 0, -(height+phantomHeight))
-    breastPhantomToCavityTopNode.SetMatrixTransformToParent(breastPhantomToCavityTopTransform.GetMatrix())
+    breastPhantomToCavityTopTransform.Translate(0, 0, (height+(phantomHeight/2)))
+    breastPhantomToCavityTopNode.SetMatrixTransformToParent(breastPhantomToCavityTopTransform.GetMatrix())"""
 
-    """ like this:
-    transform2 = vtk.vtkTransform()
-    trasnform2.Translate(0, 0, h)
-    breastPhantomToCavityTopNode.SetMatrixTransformToParent(transform2.GetMatrix())
-    """
-
-    breastModel.SetAndObserveTransformNodeID(breastPhantomToCavityTopNode.GetID())
-    breastPhantomToCavityTopNode.SetAndObserveTransformNodeID(cavityTopToRetractorNode.GetID())
+    breastModel.SetAndObserveTransformNodeID(cavityTopToRetractorNode.GetID())
+    #breastPhantomToCavityTopNode.SetAndObserveTransformNodeID(cavityTopToRetractorNode.GetID())
     cavityTopToRetractorNode.SetAndObserveTransformNodeID(retractorToTrackerNode.GetID())
-  
-    return breastModel
+
+    return breastModel, outputModel
     
 
 
-  def setupForSubtract(self, breastModel, segmentationNode=None):
+  def setupForSubtract(self, breastModel, tumorModel):
+    """
+    Create all elements for subtraction using the segmentation editor modeule
+    :param breastModel: output model - model an object is subtracted from
+    :param tumorModel: model to subtract
+    :param segmentationNode: an optional pre-existing segmentation Node
+    """
     # TODO: adjust way of getting nodes to be more universal
 
     breastModel.SetDisplayVisibility(0)
     
-    #segmentationNode = slicer.mrmlScene.GetFirstNodeByName("CavitySegmentation")
+    segmentationNode = slicer.mrmlScene.GetFirstNodeByName("CavitySegmentation")
     if segmentationNode is None:
       segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", "CavitySegmentation")
     segmentationNode.CreateDefaultDisplayNodes()
     
-    retractorModelToRetractorNode = slicer.util.getNode("retractorModelToRetractor")
+    #TODO get retractor transform rather than using name
+    retractorModelToRetractorNode = slicer.util.getNode("RetractorModelToRetractor")
     segmentationNode.SetAndObserveTransformNodeID(retractorModelToRetractorNode.GetID())
 
+    # import models to segmentations
     slicer.modules.segmentations.logic().ImportModelToSegmentationNode(breastModel, segmentationNode)
 
-    tumor = slicer.util.getNode("solidCavity")
-    tumor.SetDisplayVisibility(0)
+    #tumor = slicer.util.getNode("solidCavity")
+    tumorModel.SetDisplayVisibility(0)
 
-    slicer.modules.segmentations.logic().ImportModelToSegmentationNode(tumor, segmentationNode)
+    slicer.modules.segmentations.logic().ImportModelToSegmentationNode(tumorModel, segmentationNode)
 
+    # create segment editor nodes
     segmentEditorNode = slicer.vtkMRMLSegmentEditorNode()
     slicer.mrmlScene.AddNode(segmentEditorNode)
 
@@ -672,7 +595,9 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
     segmentEditorWidget.setMRMLScene(slicer.mrmlScene)
 
     breastID = segmentationNode.GetSegmentation().GetSegmentIdBySegmentName(breastModel.GetName())
-    tumorID = segmentationNode.GetSegmentation().GetSegmentIdBySegmentName("solidCavity")
+    tumorID = segmentationNode.GetSegmentation().GetSegmentIdBySegmentName(tumorModel.GetName())
+
+    slicer.mrmlScene.RemoveNode(breastModel)
 
     return segmentEditorWidget, segmentEditorNode, segmentationNode, breastID, tumorID
 
@@ -686,9 +611,10 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
     :param showResult: show output volume in slice viewers
     """
     #self.pointCloud = self.generatePointCloud(outputPoints)
-    self.model = self.generateModel(outputPoints)
-    segmentEditorWidget, segmentEditorNode, segmentationNode, breastID, tumorID = self.setupForSubtract(self.model)
+    breastModel, tumorModel = self.generateModel(outputPoints)
+    segmentEditorWidget, segmentEditorNode, segmentationNode, breastID, tumorID = self.setupForSubtract(breastModel, tumorModel)
     self.subtract_segment(segmentEditorWidget, segmentEditorNode, segmentationNode, breastID, tumorID)
+    self.set_triple3D()
 
   def subtract_segment(self, segmentEditorWidget, segmentEditorNode, segmentationNode, segmentID, to_subtract_segmentID):
     '''Perform logical subtraction of to_subtract_segmentID from segmentID'''
@@ -705,13 +631,20 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
     segmentationNode.GetDisplayNode().SetSegmentVisibility(to_subtract_segmentID, 0)
     segmentationNode.RemoveSegment(to_subtract_segmentID)
 
+
     slicer.mrmlScene.RemoveNode(segmentEditorNode)
 
     shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
     exportFolderItemId = shNode.CreateFolderItem(shNode.GetSceneItemID(), "CavityVisualization")
+  
     slicer.modules.segmentations.logic().ExportAllSegmentsToModels(segmentationNode, exportFolderItemId)
+    
+    cavity = slicer.mrmlScene.GetFirstNodeByName((segmentationNode.GetSegmentation().GetSegment(segmentID)).GetName())
+    cavity.GetDisplayNode().SetOpacity(0.5)
 
     self.removeSegmentation(segmentationNode, segmentID)
+
+
 
   def removeSegmentation(self, segmentationNode, segmentID):
     segmentationDisplay = segmentationNode.GetDisplayNode()
@@ -719,6 +652,10 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
     
     slicer.mrmlScene.RemoveNode(segmentationDisplay)
     slicer.mrmlScene.RemoveNode(segmentationNode)
+
+  def set_triple3D(self):
+    triple3D = slicer.vtkMRMLLayoutNode.SlicerLayoutTriple3DEndoscopyView
+    slicer.app.layoutManager().setLayout(triple3D)
     
 
 
