@@ -129,7 +129,6 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
 
     # Connections
 
-    #self.MarkupsToModelLogic=slicer.modules.markupstomodel.logic()
 
     # These connections ensure that we update parameter node when scene is closed
     self.addObserver(slicer.mrmlScene, slicer.mrmlScene.StartCloseEvent, self.onSceneStartClose)
@@ -294,8 +293,8 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
     Run processing when user clicks "Apply" button.
     """
     with slicer.util.tryWithErrorDisplay("Failed to compute results.", waitCursor=True):
-      probe = slicer.util.loadModel(os.path.dirname(__file__) +"\Resources\\ExampleModels/built_probe.stl")
-      retractor = slicer.util.loadModel(os.path.dirname(__file__) +"\Resources\\ExampleModels/retractor.stl")
+      probe = slicer.util.loadModel(os.path.dirname(__file__) +"\Resources\\ExampleModels/newSSS_probe.stl")
+      retractor = slicer.util.loadModel(os.path.dirname(__file__) +"\Resources\\ExampleModels/new_retractor.stl")
   
   def onPlaceTestPointButton(self):
     """
@@ -328,6 +327,20 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
       testPoints.SetAndObserveTransformNodeID(RetractorToTrackerNode.GetID())
 
       self.logic.placePoint(tip, testPoints)
+
+      print(testPoints.GetNumberOfMarkups() )
+
+            
+      for i in range(testPoints.GetNumberOfMarkups()):
+
+        import numpy as np
+        pos =  np.zeros(3)
+        testPoints.GetNthFiducialPosition(0,pos)
+
+        pointModel = self.logic.generateTestPointModel(pos, "testPointModel")
+
+        transformID = slicer.util.getNode("NeedleTipToNeedle").GetID()
+        self.logic.addBreachWarning(pointModel, transformID)
   
   def onPlaceNeedleButton(self):
     """
@@ -463,12 +476,9 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
       return outputPoints
 
 
-  def generateModel(self, pointCloud):
+  def generateModel(self, pointCloud, name):
 
     import numpy as np
-
-    # hide users point cloud
-    pointCloud.SetDisplayVisibility(0)
 
     pointsForHull = vtk.vtkPoints()
     Zs = []
@@ -519,9 +529,9 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
     surfaceFilter.Update()
 
     # create convex hull model
-    outputModel = slicer.mrmlScene.GetFirstNodeByName("solidCavity")
+    outputModel = slicer.mrmlScene.GetFirstNodeByName(name)
     if outputModel is None:
-      outputModel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "solidCavity")
+      outputModel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", name)
     outputModel.SetAndObservePolyData(surfaceFilter.GetOutput())
     outputModel.CreateDefaultDisplayNodes()
     outputModel.GetDisplayNode().SetColor(0,0,1)
@@ -531,7 +541,20 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
     retractorToTrackerNode = slicer.util.getNode("RetractorToTracker")
     outputModel.SetAndObserveTransformNodeID(retractorToTrackerNode.GetID())
 
-    # load in the breast pphantom model and transform it to the retractor coordinate space and proper height 
+   
+    return outputModel
+    
+
+  def setupForSubtract(self, tumorModel):
+    """
+    Create all elements for subtraction using the segmentation editor modeule
+    :param breastModel: output model - model an object is subtracted from
+    :param tumorModel: model to subtract
+    :param segmentationNode: an optional pre-existing segmentation Node
+    """
+    # TODO: adjust way of getting nodes to be more universal
+
+     # load in the breast pphantom model and transform it to the retractor coordinate space and proper height 
     breastModel = slicer.util.loadModel(os.path.dirname(__file__) +"\Resources\\ExampleModels/breastPhantom.stl")
 
     #breastModel = slicer.util.getNode("breastPhantom_1")
@@ -553,18 +576,6 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
     #breastPhantomToCavityTopNode.SetAndObserveTransformNodeID(cavityTopToRetractorNode.GetID())
     cavityTopToRetractorNode.SetAndObserveTransformNodeID(retractorToTrackerNode.GetID())
 
-    return breastModel, outputModel
-    
-
-
-  def setupForSubtract(self, breastModel, tumorModel):
-    """
-    Create all elements for subtraction using the segmentation editor modeule
-    :param breastModel: output model - model an object is subtracted from
-    :param tumorModel: model to subtract
-    :param segmentationNode: an optional pre-existing segmentation Node
-    """
-    # TODO: adjust way of getting nodes to be more universal
 
     breastModel.SetDisplayVisibility(0)
     
@@ -611,8 +622,10 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
     :param showResult: show output volume in slice viewers
     """
     #self.pointCloud = self.generatePointCloud(outputPoints)
-    breastModel, tumorModel = self.generateModel(outputPoints)
-    segmentEditorWidget, segmentEditorNode, segmentationNode, breastID, tumorID = self.setupForSubtract(breastModel, tumorModel)
+    # hide users point cloud
+    outputPoints.SetDisplayVisibility(0)
+    tumorModel = self.generateModel(outputPoints, "solidCavity")
+    segmentEditorWidget, segmentEditorNode, segmentationNode, breastID, tumorID = self.setupForSubtract(tumorModel)
     self.subtract_segment(segmentEditorWidget, segmentEditorNode, segmentationNode, breastID, tumorID)
     self.set_triple3D()
 
@@ -657,6 +670,30 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
     triple3D = slicer.vtkMRMLLayoutNode.SlicerLayoutTriple3DEndoscopyView
     slicer.app.layoutManager().setLayout(triple3D)
     
+
+  def generateTestPointModel(self, center, name):
+  
+    outputModel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", name)
+    
+    s = vtk.vtkSphereSource()
+    s.SetRadius(2.5)
+    s.SetCenter(center)
+    s.Update()
+
+    outputModel.SetAndObservePolyData(s.GetOutput())
+    outputModel.CreateDefaultDisplayNodes()
+    outputModel.GetDisplayNode().SetColor(0,0,1)
+
+    RetractorToTrackerNode = slicer.util.getNode("RetractorToTracker")
+    outputModel.SetAndObserveTransformNodeID(RetractorToTrackerNode.GetID())
+
+    return outputModel
+
+  def addBreachWarning(self, pointModel, transformID):
+    breachWarningNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLBreachWarningNode")
+    slicer.modules.breachwarning.logic().SetWatchedModelNode(pointModel,breachWarningNode)
+    breachWarningNode.SetAndObserveToolTransformNodeId(transformID)
+    slicer.modules.breachwarning.logic().SetLineToClosestPointVisibility(1,breachWarningNode)
 
 
 
