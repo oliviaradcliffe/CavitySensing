@@ -19,7 +19,7 @@ class US_Cavity_Reconstruction(ScriptedLoadableModule):
   def __init__(self, parent):
     ScriptedLoadableModule.__init__(self, parent)
     self.parent.title = "US Cavity Reconstruction"  # TODO: make this more human readable by adding spaces
-    self.parent.categories = ["Examples"]  # TODO: set categories (folders where the module shows up in the module selector)
+    self.parent.categories = ["Ultrasound"]  # TODO: set categories (folders where the module shows up in the module selector)
     self.parent.dependencies = []  # TODO: add here list of module names that this module requires
     self.parent.contributors = ["Olivia Radcliffe (Perk/Medi Lab)"]  # TODO: replace with "Firstname Lastname (Organization)"
     # TODO: update with short description of the module and a link to online module documentation
@@ -293,7 +293,7 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
     Run processing when user clicks "Apply" button.
     """
     with slicer.util.tryWithErrorDisplay("Failed to compute results.", waitCursor=True):
-      probe = slicer.util.loadModel(os.path.dirname(__file__) +"\Resources\\ExampleModels/newSSS_probe.stl")
+      probe = slicer.util.loadModel(os.path.dirname(__file__) +"\Resources\\ExampleModels/new_probe.stl")
       retractor = slicer.util.loadModel(os.path.dirname(__file__) +"\Resources\\ExampleModels/new_retractor.stl")
   
   def onPlaceTestPointButton(self):
@@ -571,6 +571,8 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
     breastPhantomToCavityTopTransform = vtk.vtkTransform()
     breastPhantomToCavityTopTransform.Translate(0, 0, (height+(phantomHeight/2)))
     breastPhantomToCavityTopNode.SetMatrixTransformToParent(breastPhantomToCavityTopTransform.GetMatrix())"""
+
+    retractorToTrackerNode = slicer.util.getNode("RetractorToTracker")
 
     breastModel.SetAndObserveTransformNodeID(cavityTopToRetractorNode.GetID())
     #breastPhantomToCavityTopNode.SetAndObserveTransformNodeID(cavityTopToRetractorNode.GetID())
