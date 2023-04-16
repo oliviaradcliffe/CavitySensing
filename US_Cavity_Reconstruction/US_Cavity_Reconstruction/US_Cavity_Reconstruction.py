@@ -155,6 +155,11 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
     self.ui.stopButton.connect('clicked(bool)', self.onStopButton)
     self.ui.generateModel.connect('clicked(bool)', self.onGenerateButton)
 
+    # visualization
+    self.ui.generateTumourButton.connect('clicked(bool)', self.onGenerateTumorButton)
+    self.ui.enableNavigationCheckbox.connect("toggled(bool)", self.onEnableNavigationCheckbox)
+
+
     # Make sure parameter node is initialized (needed for module reload)
     self.initializeParameterNode()
 
@@ -415,7 +420,20 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
       self.logic.process(self.ui.tipSelector.currentNode(), 
       self.ui.outputSelector.currentNode())
 
-      
+  def onGenerateTumorButton(self):
+    """
+    Generates a tumor model from the pointListRed_World points
+    """
+    with slicer.util.tryWithErrorDisplay("Failed to compute results.", waitCursor=True):
+      self.logic.generateTumor()
+
+  
+  def onEnableNavigationCheckbox(self, state):
+    """
+    Enable/Disable navigation
+    """
+    with slicer.util.tryWithErrorDisplay("Failed to compute results.", waitCursor=True):
+      self.logic.enableNavigation(state)
 
 #
 # US_Cavity_ReconstructionLogic
@@ -450,7 +468,7 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
   
   def placePoint(self, probeTip, outputPoints):
     import numpy as np
-
+    print("Debugging: point placed")
     for i in range(probeTip.GetNumberOfMarkups()):
       # get point position
       pos = np.zeros(3)
@@ -669,9 +687,28 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
     slicer.mrmlScene.RemoveNode(segmentationNode)
 
   def set_triple3D(self):
+    # Set to triple 3D view
     triple3D = slicer.vtkMRMLLayoutNode.SlicerLayoutTriple3DEndoscopyView
     slicer.app.layoutManager().setLayout(triple3D)
+    # Set the angle of the 3D views
     
+    # The second view should be the side view
+    # The third view should be the front view
+    cameraNode = slicer.modules.cameras.logic().GetViewActiveCameraNode(slicer.app.layoutManager().threeDWidget(0).mrmlViewNode())
+    # Set the camera position 1
+    cameraNode.SetPosition([-22.797165793169604, -327.31100424393105, -32.89968700041658])
+    cameraNode.SetFocalPoint([-6.428269131321022, 25.387306384949536, -22.541016228068706])
+    cameraNode.SetViewUp([-1, 0, 0])
+    # Set the camera position 2
+    cameraNode = slicer.modules.cameras.logic().GetViewActiveCameraNode(slicer.app.layoutManager().threeDWidget(1).mrmlViewNode())
+    cameraNode.SetPosition([-29.739841516419293, 6.800195873066253, -281.50844451170815])
+    cameraNode.SetFocalPoint([0.5996254445084617, 22.754982645586885, -1.3608656337910645])
+    cameraNode.SetViewUp([0, -1, 0])
+    # Set the camera position 3
+    cameraNode = slicer.modules.cameras.logic().GetViewActiveCameraNode(slicer.app.layoutManager().threeDWidget(2).mrmlViewNode())
+    cameraNode.SetPosition([224.2681082329677, 14.389053723089877, -75.35438455128524])
+    cameraNode.SetFocalPoint([-8.528836308582385, 17.923943384488755, -61.19913412126311])
+    cameraNode.SetViewUp([-0.010467168505081623, -0.9969893997410547, 0.0768282186924673])
 
   def generateTestPointModel(self, center, name):
   
