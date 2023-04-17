@@ -5,6 +5,7 @@ import qt
 from slicer.ScriptedLoadableModule import *
 from slicer.util import VTKObservationMixin
 from time import sleep
+import numpy as np
 
 #
 # US_Cavity_Reconstruction
@@ -425,7 +426,8 @@ class US_Cavity_ReconstructionWidget(ScriptedLoadableModuleWidget, VTKObservatio
     Generates a tumor model from the pointListRed_World points
     """
     with slicer.util.tryWithErrorDisplay("Failed to compute results.", waitCursor=True):
-      self.logic.generateTumor()
+      # TODO: add selector so not hardcoded?
+      self.logic.generateTumor(slicer.util.getNode("pointListRed_World"))
 
   
   def onEnableNavigationCheckbox(self, state):
@@ -734,6 +736,65 @@ class US_Cavity_ReconstructionLogic(ScriptedLoadableModuleLogic):
     breachWarningNode.SetAndObserveToolTransformNodeId(transformID)
     slicer.modules.breachwarning.logic().SetLineToClosestPointVisibility(1,breachWarningNode)
 
+  def generateTumor(self, pointCloud):
+    pointsForHull = vtk.vtkPoints()
+    Zs = []
+
+    # add z value to zs and positions to hull points
+    for i in range(pointCloud.GetNumberOfMarkups()):
+        pos = np.zeros(3)
+        pointCloud.GetNthFiducialPosition(i,pos)
+
+        pointsForHull.InsertNextPoint(pos)
+        Zs.append(pos[2])
+
+    pointCloud.SetDisplayVisibility(0)
+
+    # create convex hull of the tumor
+    hullPolydata = vtk.vtkPolyData()
+    hullPolydata.SetPoints(pointsForHull)
+
+    delaunay = vtk.vtkDelaunay3D()
+    delaunay.SetInputData(hullPolydata)
+    delaunay.Update()
+
+    surfaceFilter = vtk.vtkDataSetSurfaceFilter()
+    surfaceFilter.SetInputConnection(delaunay.GetOutputPort())
+    surfaceFilter.Update()
+
+    subdivisionFilter = vtk.vtkButterflySubdivisionFilter()
+    subdivisionFilter.SetInputConnection(surfaceFilter.GetOutputPort())
+    subdivisionFilter.SetNumberOfSubdivisions(3)
+    subdivisionFilter.Update()
+
+    convexHull = vtk.vtkDelaunay3D()
+    convexHull.SetInputConnection(subdivisionFilter.GetOutputPort())
+    convexHull.Update()
+
+    surfaceFilter = vtk.vtkDataSetSurfaceFilter()
+    surfaceFilter.SetInputData(convexHull.GetOutput())
+    surfaceFilter.Update()
+
+    # create convex hull model
+    outputModel = slicer.mrmlScene.GetFirstNodeByName("Tumour")
+    if outputModel is None:
+      outputModel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "Tumour")
+    outputModel.SetAndObservePolyData(surfaceFilter.GetOutput())
+    outputModel.CreateDefaultDisplayNodes()
+    outputModel.GetDisplayNode().SetColor(1,0,0)
+  
+  def enableNavigation(self, state):
+    if state:
+      tumorModel = slicer.util.getNode("Tumour") 
+
+      transformID = slicer.util.getNode("ProbeModelToProbe").GetID()
+      self.addBreachWarning(tumorModel, transformID)
+    else:
+      breachWarningNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLBreachWarningNode")
+      slicer.modules.breachwarning.logic().SetWatchedModelNode(None,breachWarningNode)
+
+      distance = slicer.util.getNode("d")
+      slicer.mrmlScene.RemoveNode(distance)
 
 
     
