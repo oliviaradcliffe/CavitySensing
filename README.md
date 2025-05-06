@@ -20,5 +20,4 @@
 - Generate tumour: Creates a small sphere tumour model around the placed point
 - Enable Navigation: Displays the distancew from the needle tip to the tumour model
 
-![Example end product](./US_Cavity_Reconstruction/US_Cavity_Reconstruction/Resources
-/Screenshots/distance_to_tumor.PNG)
+![Example end product](US_Cavity_Reconstruction/US_Cavity_Reconstruction/Resources/Screenshots/distance_to_tumor.PNG)
